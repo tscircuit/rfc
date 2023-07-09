@@ -17,6 +17,7 @@ A README should have the following components:
 - [ ] Usage Example
 - [ ] Detailed Usage
 - [ ] Link to open project in CodeSandbox
+- [ ] Development section with development setup instructions and testing instructions
 
 
 ## Continuous Integration
