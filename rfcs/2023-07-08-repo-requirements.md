@@ -27,6 +27,7 @@ A README should have the following components:
 - [ ] Github Workflow that runs `prettier --check`
 - [ ] Github Workflow testing types
 - [ ] Vercel Deployment for Storybook or Homepage
+- [ ] Linting for correct style (TODO `xo` configs)
 
 ## Running A Project
 
