@@ -23,6 +23,8 @@ A README should have the following components:
 
 - [ ] Github Workflow with auto-publishing via Semantic Release
 - [ ] Github Workflow running test suite
+- [ ] Github Workflow that runs `prettier --check` (maybe Rome in future)
+- [ ] Github Workflow testing types
 
 ## Running A Project
 
