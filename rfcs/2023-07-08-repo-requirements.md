@@ -23,11 +23,16 @@ A README should have the following components:
 
 - [ ] Github Workflow with auto-publishing via Semantic Release
 - [ ] Github Workflow running test suite
-- [ ] Github Workflow that runs `prettier --check` (maybe Rome in future)
+- [ ] Github Workflow that runs `prettier --check`
 - [ ] Github Workflow testing types
+- [ ] Vercel Deployment for Storybook or Homepage
 
 ## Running A Project
 
 - [ ] Test Suite using Ava or Vitest (prefer Ava)
 - [ ] Codesandbox configuration with working test and run commands
 
+## Documentation Sites
+
+- Projects should NEVER deploy separate documentation sites,
+  all documentation should be available on [docs.tscircuit.com](https://docs.tscircuit.com)
