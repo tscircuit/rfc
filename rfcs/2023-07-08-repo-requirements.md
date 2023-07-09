@@ -30,7 +30,7 @@ A README should have the following components:
 
 ## Running A Project
 
-- [ ] Test Suite using Ava or Vitest (prefer Ava)
+- [ ] Test Suite using Ava
 - [ ] Codesandbox configuration with working test and run commands
 
 ## Documentation Sites
