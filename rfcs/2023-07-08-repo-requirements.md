@@ -12,6 +12,7 @@ A README should have the following components:
 
 - [ ] Badge with latest version number
 - [ ] Link to tscircuit.com, twitter, and Slack
+- [ ] Link to Storybook if there's a storybook (can deploy via Vercel)
 - [ ] Explanation and purpose of project
 - [ ] Installation
 - [ ] Usage Example
