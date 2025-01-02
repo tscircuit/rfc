@@ -16,6 +16,9 @@ Engineers faced with complex chip interaction always do one of the following:
 These should not be necessary. Logic simulation can enable safe experimentation and deeper
 understanding of the chips on a board, and should be a builtin of common chips and designs.
 
+### Examples of Chips that would benefit from logic simulation
+
+- LED Driver and Keyscan Chip: https://cdn-shop.adafruit.com/datasheets/ht16K33v110.pdf
 
 ## Input Types
 
