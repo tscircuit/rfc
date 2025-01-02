@@ -45,12 +45,12 @@ const chipLogic = {
     EN: "input_high_or_low",
     D2: "output_high_or_low"
   },
-  onEvent(event, state, emit) => {
+  onEvent(event, chipState, emit) => {
      // captures every event
   },
-  onInit: (event, state, emit) => {},
-  onHighOrLowSignal: (event, state, emit) => {},
-  onDataSignal: (event, state, emit) => {}
+  onInit: (event, chipState, emit) => {},
+  onHighOrLowSignal: (event, chipState, emit) => {},
+  onDataSignal: (event, chipState, emit) => {}
 }
 
 <chip
@@ -58,6 +58,48 @@ const chipLogic = {
   logic={chipLogic}
 />
 ```
+
+## Event Types
+
+When an event is received, new events can be emitted to trigger other state machines.
+
+The state of a chip cannot be directly manipulating by modifying the `chipState`, the event
+handler must `emit` events to manipulate it. This allows us to analyze dependencies and
+ensure other state machines receive the change.
+
+| Event | Description |
+| ----- | -------- |
+| CHIP_STARTUP | Usually ignored, this can be used to  | 
+| CHIP_NORMAL_OPERATION_START | The first "normal operation" event emitted to chips. This is used to initialize output pins if nothing was done in CHIP_STARTUP  |
+| SIGNAL_CHANGE | Called on any rising or falling edge for pin logic |
+| BITS_TRANSMISSION_START | Called before the rising edge where data is about to be submitted |
+| BITS_TRANSMISSION_END | Called after all data is transmitted |
+
+### Event Payloads
+
+Every event has the following parameters:
+
+```tsx
+{
+  tNs: number // time since start in nanoseconds
+}
+```
+
+## Chip State (`state`)
+
+The chip state handler (the `state` object) can be defined as follows:
+
+```tsx
+interface ChipStateHandler {
+  currentPinValues: Record<PinName, 0 | 1>,
+  pinHistory: Record<PinName, {
+    getLogicLevelAtTime: (t: number) => 0 | 1,
+    getLastBitsSent: () => Array<0 | 1>
+    // ... TODO
+  }>
+}
+```
+
 
 ## Waveform View
 
@@ -70,5 +112,8 @@ Ref: Sigrok, GTkwave
 Logic can be disabled or enabled at a platform level. Logic executes until events are complete
 or until the real time extends past the context `maxLogicTime` or the data exceeds `maxLogicEvents`
 
-Every state machine is executed until it is stable. Dependencies are considered when executing
-chip logic.
+Every state machine is executed until it is stable (no events emitted) or a stopping constraint is met.
+Dependencies are considered when executing chip logic. Where there are ambiguous dependencies, we throw
+an error for now.
+
+Some ambiguous order scenarios are automatically resolved (TODO, data dependency resolution logic?)
