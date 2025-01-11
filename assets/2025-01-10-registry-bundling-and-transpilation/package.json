@@ -1,0 +1,19 @@
+{
+  "name": "2025-01-10-registry-bundling-and-transpilation",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@rollup/browser": "^4.30.1",
+    "@types/babel__standalone": "^7.1.9",
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@babel/standalone": "^7.26.5",
+    "prettier": "^3.4.2",
+    "react": "^19.0.0"
+  }
+}
