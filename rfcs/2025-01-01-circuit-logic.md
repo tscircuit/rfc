@@ -85,6 +85,7 @@ Every event has the following parameters:
 ```tsx
 {
   tNs: number // time since start in nanoseconds
+  tick: number // (unsigned bigint) number of cycle/step since start, mainly to synchronize with other simulator
 }
 ```
 
