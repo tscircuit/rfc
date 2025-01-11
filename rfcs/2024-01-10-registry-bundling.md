@@ -147,7 +147,9 @@ The commonjs variant of the module is stored at `dist/index.cjs`
 
 ## The Rollup Plugin
 
-This custom rollup plugin enables bundling of tsci modules.
+This custom rollup plugin enables bundling of tsci modules. This is the basic
+concept, you may need to modify in production. See the [example scripts](../assets/2025-01-10-registry-bundling-and-transpilation/) for more information about
+usage.
 
 ```tsx
 const bundleTsciModulesPlugin = {
