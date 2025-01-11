@@ -15,3 +15,5 @@ export const MySnippet = ({ power }: { power: string }) => (
 export const useMySnippet = () => createUseComponent(pinLabels, MySnippet)
 
 `.trim();
+
+

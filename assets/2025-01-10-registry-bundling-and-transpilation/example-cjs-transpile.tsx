@@ -2,6 +2,7 @@ import * as Babel from "@babel/standalone";
 import exampleSnippet from "./example-snippet.string";
 import { rollup } from "@rollup/browser";
 import prettier from "prettier";
+import * as tscircuitCore from "@tscircuit/core";
 
 const babelResult = Babel.transform(exampleSnippet, {
 	presets: ["react", "typescript"],
@@ -26,15 +27,11 @@ const virtualModulesPlugin = {
 		// Local JSON file
 		if (source === "./manual-edits.json") return source;
 
-		// Any third-party or local modules you see in the snippet:
-		// e.g. "@tsci/seveibar.custom-led", "@tscircuit/core"
-		if (source.startsWith("@tsci/seveibar.custom-led")) return source;
-		if (source.startsWith("@tscircuit/core")) return source;
+		if (source.startsWith("@tsci/")) {
+			return source
+		}
 
-		// If we don't recognize it, we can still return null,
-		// but be aware that Rollup might attempt default FS resolution next.
-		// If that's going to fail, you'll need to handle it here too.
-		return null;
+		return { id: source, external: true };
 	},
 	// 2. Provide the module source for each resolved import
 	load(id: string) {
@@ -46,16 +43,13 @@ const virtualModulesPlugin = {
 			// Example: we can inline an empty JSON for now
 			return "export default {};";
 		}
+
 		if (id.startsWith("@tsci/seveibar.custom-led")) {
 			// Provide minimal stubs or the actual code if you have it
 			return `export const CustomLed = (props) => null;`;
 		}
-		if (id.startsWith("@tscircuit/core")) {
-			return `export default {}; export const createUseComponent = (...args) => null;`;
-		}
 
-		// For anything else, just provide a dummy export or mark as external
-		return `export default {};`;
+		return null
 	},
 };
 
@@ -68,7 +62,7 @@ const bundle = await rollup({
 });
 
 const rollupResult = await bundle.generate({
-	format: "esm",
+	format: "cjs",
 	name: "MyBundle",
 });
 
@@ -79,14 +73,41 @@ console.log(
 );
 console.log("\n");
 
-console.log("------------- STAGE 3 BLOB AND EVAL --------------\n\n");
+console.log("------------- STAGE 3 (Version 1) REQUIRE --------------\n\n");
 
 const blob = new Blob([rollupResult.output[0].code], {
 	type: "application/javascript",
 });
 const url = URL.createObjectURL(blob);
-const module = await import(url);
+const module1 = require(url)
 
-console.log(module);
-console.log(<module.MySnippet />);
+console.log(module1);
+console.log(<module1.MySnippet />);
+console.log("\n");
+
+console.log("------------- STAGE 3 (Version 2) BROWSER-STYLE EVAL --------------\n\n");
+
+const dependencies = {
+	"@tscircuit/core": tscircuitCore
+}
+
+
+function createRequire(dependencies: Record<string, any>) {
+  return function require(moduleName: string) {
+    if (!dependencies[moduleName]) {
+      throw new Error(`Module ${moduleName} not found`);
+    }
+    return dependencies[moduleName];
+  }
+}
+
+const moduleCode = rollupResult.output[0].code
+
+const requireFn = createRequire(dependencies);
+const module2 = { exports: {} };
+const fn = new Function('require', 'module', 'exports', moduleCode);
+fn(requireFn, module2, module2.exports)
+
+console.log(module2.exports);
+console.log(<module2.exports.MySnippet />);
 console.log("\n");

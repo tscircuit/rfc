@@ -5,8 +5,11 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@rollup/browser": "^4.30.1",
+    "@tscircuit/core": "^0.0.262",
     "@types/babel__standalone": "^7.1.9",
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/react": "^19.0.4",
+    "debug": "^4.4.0"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
@@ -14,6 +17,6 @@
   "dependencies": {
     "@babel/standalone": "^7.26.5",
     "prettier": "^3.4.2",
-    "react": "^19.0.0"
+    "react": "18"
   }
 }
