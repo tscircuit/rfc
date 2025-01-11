@@ -62,7 +62,32 @@ const babelResult = Babel.transform(sourceCode, {
   plugins: [],
   filename: "virtual.tsx",
 })
+```
 
+This will output javascript without types, something that can be consumed in
+non-javascript runtimes.
+
+```
+import manualEdits from "./manual-edits.json";
+import { CustomLed } from "@tsci/seveibar.custom-led";
+import { createUseComponent } from "@tscircuit/core";
+const pinLabels = ["power"];
+export const MySnippet = ({ power }) =>
+  /*#__PURE__*/ React.createElement(
+    "subcircuit",
+    {
+      manualEdits: manualEdits,
+    },
+    /*#__PURE__*/ React.createElement(CustomLed, {
+      name: "LED1",
+      gnd: "net.GND",
+      v5: power,
+    }),
+  );
+export const useMySnippet = () => createUseComponent(pinLabels, MySnippet);
+```
+
+```tsx
 // Stage 2: Bundle with Rollup
 const bundle = await rollup({
   input: "entry.js",
@@ -84,12 +109,42 @@ const module = await import(url)
 console.log(<module.MySnippet />)
 ```
 
+The rollup result will look like this, you can see the things like the
+`import manualEdits from "./manual-edits.json"` have been replaced with
+the actual content of the files. This happens for local imports as well
+as any `@tsci/*` import.
+
+```
+import { createUseComponent } from "@tscircuit/core";
+
+var manualEdits = {};
+
+const CustomLed = (props) => <led {...props} />
+
+const pinLabels = ["power"];
+const MySnippet = ({ power }) =>
+  /*#__PURE__*/ React.createElement(
+    "subcircuit",
+    {
+      manualEdits: manualEdits,
+    },
+    /*#__PURE__*/ React.createElement(CustomLed, {
+      name: "LED1",
+      gnd: "net.GND",
+      v5: power,
+    }),
+  );
+const useMySnippet = () => createUseComponent(pinLabels, MySnippet);
+
+export { MySnippet, useMySnippet };
+```
+
 ### Computed Asset `dist/index.js`
 
 The registry computes the bundled asset `dist/index.js` which contains the esm
 version of the module (the output of rollup above)
 
-## 2. CommonJS Browser Eval
+## 2. CommonJS Browser Eval Pipeline
 
 > Check out the [example-cjs-transpile.tsx script](../assets/2025-01-10-registry-bundling-and-transpilation/example-cjs-transpile.tsx)
 
@@ -111,14 +166,39 @@ const rollupResult = await bundle.generate({
   format: "cjs",
   name: "MyBundle",
 })
+```
 
-// Stage 3 (option 1) Evaluation via require
-const module = require(URL.createObjectURL(
-  new Blob([rollupResult.output[0].code])
-))
+The rollup result will now be CommonJS, it looks like this:
 
-console.log(<module.MySnippet />)
+```
+"use strict";
 
+var core = require("@tscircuit/core");
+
+var manualEdits = {};
+
+const CustomLed = (props) => null;
+
+const pinLabels = ["power"];
+const MySnippet = ({ power }) =>
+  /*#__PURE__*/ React.createElement(
+    "subcircuit",
+    {
+      manualEdits: manualEdits,
+    },
+    /*#__PURE__*/ React.createElement(CustomLed, {
+      name: "LED1",
+      gnd: "net.GND",
+      v5: power,
+    }),
+  );
+const useMySnippet = () => core.createUseComponent(pinLabels, MySnippet);
+
+exports.MySnippet = MySnippet;
+exports.useMySnippet = useMySnippet;
+```
+
+```tsx
 // Stage 3 (option 2) Custom Require Implementation (Most common!)
 const dependencies = {
   "@tscircuit/core": tscircuitCore,

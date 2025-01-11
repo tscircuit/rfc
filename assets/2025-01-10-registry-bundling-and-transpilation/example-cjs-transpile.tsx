@@ -54,7 +54,7 @@ const virtualModulesPlugin = {
 };
 
 // Replace imports via rollup
-console.log("------------- STAGE 2 ESM ROLLUP --------------\n\n");
+console.log("------------- STAGE 2 CJS ROLLUP --------------\n\n");
 
 const bundle = await rollup({
 	input: "entry.js",
