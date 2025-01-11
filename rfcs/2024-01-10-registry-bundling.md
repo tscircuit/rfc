@@ -17,6 +17,11 @@ any dynamic evaluation of tscircuit snippets.
 
 ## Constraints, Features
 
+- `esm.tscircuit.com` and `cjs.tscircuit.com` serve full javascript bundles, in
+  runtimes that support http imports with import maps you can simply do `import("https://esm.tscircuit.com/author/snippet")`
+  to import a snippet
+- `npm.tscircuit.com` will serve the [NPM registry API](https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md) (which is tarballs) and include both
+  esm and CJS options
 - `dist/index.js` is generated for every snippet and is served for snippets that
   make requests to `esm.tscircuit.com`
   - esm versions of packages should be used when using Bun
