@@ -80,6 +80,24 @@ const blob = new Blob([rollupResult.output[0].code], {
 const url = URL.createObjectURL(blob);
 const module = await import(url);
 
-console.log(module);
-console.log(<module.MySnippet />);
+// Example: Render the component in a React app
+console.log("Example Usage in React:");
+const MySnippet = module.MySnippet;
+
+// Create a wrapper component to demonstrate usage
+const ExampleUsage = () => {
+    return (
+        <div>
+            <h2>Circuit Component:</h2>
+            <MySnippet />
+        </div>
+    );
+};
+
+console.log(<ExampleUsage />);
+console.log("\n");
+
+// Example: Access the component directly
+console.log("Direct Component Access:");
+console.log(module.MySnippet);
 console.log("\n");

@@ -108,6 +108,34 @@ const module2 = { exports: {} };
 const fn = new Function('require', 'module', 'exports', moduleCode);
 fn(requireFn, module2, module2.exports)
 
-console.log(module2.exports);
-console.log(<module2.exports.MySnippet />);
+// Example: Using the component with CommonJS
+console.log("CommonJS Usage Example:");
+const { MySnippet } = module2.exports;
+
+// Create a wrapper component to demonstrate usage
+const ExampleUsage = () => {
+    return (
+        <div>
+            <h2>Circuit Component (CommonJS):</h2>
+            <MySnippet />
+        </div>
+    );
+};
+
+console.log(<ExampleUsage />);
+
+// Example: Using with dependency injection
+console.log("\nDependency Injection Example:");
+const CircuitWrapper = () => {
+    return (
+        <div>
+            <h3>With Injected Dependencies:</h3>
+            <MySnippet 
+                core={dependencies["@tscircuit/core"]}
+            />
+        </div>
+    );
+};
+
+console.log(<CircuitWrapper />);
 console.log("\n");
