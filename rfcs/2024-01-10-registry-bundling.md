@@ -203,6 +203,8 @@ exports.MySnippet = MySnippet;
 exports.useMySnippet = useMySnippet;
 ```
 
+### Evaluating the CJS Bundle in a Browser using dependency injection
+
 ```tsx
 // Stage 3 (option 2) Custom Require Implementation (Most common!)
 const dependencies = {
