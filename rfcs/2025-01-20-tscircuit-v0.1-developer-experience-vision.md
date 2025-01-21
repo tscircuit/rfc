@@ -1,4 +1,4 @@
-# tscircuit v0.1 Vision
+# tscircuit v0.1 Developer Experience Vision
 
 This RFC lays out the vision for the tscircuit v0.1 release. The main idea behind the
 v0.1 release is to make tscircuit viable for commercial electronics development by
