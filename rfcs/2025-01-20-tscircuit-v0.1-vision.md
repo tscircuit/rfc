@@ -57,6 +57,16 @@ If any of these workflows fail, the `tsci push` command will error. If you do
 
 Running `tsci push` is the same as saving a snippet on `tscircuit.com`
 
-### Versioning
+### Releasing New Versions
+
+`tsci release` is the same as `tsci push`, except it increments the version of the
+package.
+
+- When a new package version is released, the package release associated with the
+  version is "locked". It can no longer be changed.
+- If you push to a package and the last version is locked, the package automatically
+  gets a new "patch" version which becomes the `latest` version of the package.
+- You can increment the minor version with `tsci release --minor` or `tsci release --major`
+
 
 
