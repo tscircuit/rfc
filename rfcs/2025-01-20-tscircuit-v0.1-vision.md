@@ -13,7 +13,9 @@ The most important features for the tscircuit v0.1 releases are as follows:
   - Package installation with typechecking
   - Package and Github workflow initialization
   - Exporting to different file formats
-- An official github workflow action for pushing to the tscircuit registry
+  - Snapshot testing
+- An official github workflow action for pushing to the tscircuit registry whenever
+  code is pushed to Github
 - A modern Registry Server
   - Public and Private Packages
   - Package bundling
@@ -21,6 +23,16 @@ The most important features for the tscircuit v0.1 releases are as follows:
   - Package Releases (Versioning)
   - Generate preview images for usage in Github READMEs
   - Organization Accounts
+ 
+## Motivation
+
+tscircuit is a new EDA tool with many capabilities. However, in v0.0.x it mainly has
+only been usable on the web. v0.1 adapts tscircuit to be more compatible with modern
+development practices. In particular, modern developers prefer:
+
+- Coding in their preferred IDE locally
+- Using Github for version control
+- Workflow automations to simplify exporting, visualizing and sharing electronics
 
 ## tscircuit Registry Packages
 
