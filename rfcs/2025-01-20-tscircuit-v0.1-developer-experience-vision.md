@@ -68,5 +68,35 @@ package.
   gets a new "patch" version which becomes the `latest` version of the package.
 - You can increment the minor version with `tsci release --minor` or `tsci release --major`
 
+## Snapshot Testing
 
+We have found that SVG snapshot testing is extremely effective at doing electronics code reviews internally
+with tscircuit. We will offer this functionality to users of tscircuit.
 
+- `tsci snapshot --update` will search for the main entrypoint and/or any `*.example.tsx` files and create `__snapshots__/*.snap.svg`
+- `tsci snapshot` will make sure that the entrypoint and all `*.example.tsx` files, when rendered, match their snapshots
+- Each `*.example.tsx` file may contain one or more exports, each export is rendered independently
+
+## `package.json` for tscircuit packages
+
+We want to have some custom data inside a tscircuit package `package.json` to provide details or information
+to the registry.
+
+The main 
+
+```json
+{
+  "name": "@tsci/seveibar.usb-c-flashlight",
+}
+```
+
+### The ".npmrc" file within each package
+
+Each package should have a `.npmrc` with the following contents to make sure that packages can be installed from
+the tscircuit registry.
+
+```
+@tsci:registry=https://npm.tscircuit.com
+```
+
+- Anytime `tsci add` or any mutating `tsci` commands are run, they will ensure this line is present in the `.npmrc`
