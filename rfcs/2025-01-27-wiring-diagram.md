@@ -32,3 +32,18 @@ Unlike Schematic diagram, Wiring diagram represent how components and boards int
   />
 </>
 ```
+
+## Cable
+
+Other than describing the connection, sometimes you want to know what kind of cable should be used (e.g HDMI, LAN, RS-232, …). This can be explicit via `<wire cable="…"` or automatically inferred from the component it connect.
+
+## Simulation
+
+When in this mode, it will switch to high-level simulation. This mean the Circuit Logic[^1] for simulating the board will be disabled in favor of Board Logic[^2]. It will fallback to Circuit Logic if the Board Logic is missing or the `<board>` has low complexity.
+
+[^1]: https://github.com/tscircuit/rfc/pull/2
+[^2]: Board Logic is a custom program for simulating the board. The simulation logic can use other simulator like avr8js or similar.
+
+## Route & Layout
+
+We can use the same route (e.g elkjs) & layout engine of Schematic diagram.
