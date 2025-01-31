@@ -121,3 +121,9 @@ Dependencies are considered when executing chip logic. Where there are ambiguous
 an error for now.
 
 Some ambiguous order scenarios are automatically resolved (TODO, data dependency resolution logic?)
+
+
+
+## References
+
+- [Wokwi Chip Simulation Framework](https://docs.wokwi.com/chips-api/getting-started)
