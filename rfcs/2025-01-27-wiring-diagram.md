@@ -46,13 +46,13 @@ Each board and component rendered as 2d svg. The board itself could be rendered 
 
 Other than describing the connection, sometimes you want to know what kind of cable should be used (e.g HDMI, LAN, RS-232, …). This can be explicit via `<wire cable="…"` or automatically inferred from the component it connect.
 
+## Route & Layout
+
+We can use the same route & layout engine of Schematic diagram. (e.g elkjs?)
+
 ## Simulation
 
 When in this mode, it will switch to high-level simulation. This mean the Circuit Logic[^circuit_logic] for simulating the board will be **disabled** in favor of Board Logic[^board_logic]. It will _fallback_ to Circuit Logic if the Board Logic is _missing_ or the `<board>` has _low complexity_.
 
 [^circuit_logic]: https://github.com/tscircuit/rfc/pull/2
 [^board_logic]: Board Logic is a custom program for simulating the board. The simulation logic can use other simulator like avr8js or similar for simulating development board like Arduino.
-
-## Route & Layout
-
-We can use the same route & layout engine of Schematic diagram. (e.g elkjs?)
