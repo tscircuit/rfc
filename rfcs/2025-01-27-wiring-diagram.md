@@ -48,7 +48,7 @@ Other than describing the connection, sometimes you want to know what kind of ca
 
 ## Simulation
 
-When in this mode, it will switch to high-level simulation. This mean the Circuit Logic[^circuit_logic] for simulating the board will be disabled in favor of Board Logic[^board_logic]. It will fallback to Circuit Logic if the Board Logic is missing or the `<board>` has low complexity.
+When in this mode, it will switch to high-level simulation. This mean the Circuit Logic[^circuit_logic] for simulating the board will be **disabled** in favor of Board Logic[^board_logic]. It will **fallback** to Circuit Logic if the Board Logic is **missing** or the `<board>` has low complexity.
 
 [^circuit_logic]: https://github.com/tscircuit/rfc/pull/2
 [^board_logic]: Board Logic is a custom program for simulating the board. The simulation logic can use other simulator like avr8js or similar for simulating development board like Arduino.
