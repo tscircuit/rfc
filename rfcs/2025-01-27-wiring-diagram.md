@@ -1,4 +1,4 @@
-#Wiring Diagram
+# Wiring Diagram
 
 Unlike Schematic diagram, Wiring diagram represent how components and boards interconnected outside of PCB. It can be said it's high-level diagram for complex project that involve many PCB boards.
 
