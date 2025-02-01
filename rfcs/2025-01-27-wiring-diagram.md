@@ -37,9 +37,10 @@ Unlike Schematic diagram, Wiring diagram represent how components and boards int
 ## Rendering
 Each board and component rendered as 2d svg. The board itself could be rendered using `@tscircuit/3d-view` where all wire-able section (usually `<via>`) have distinct html/svg `id=` attribute or using [image `<map>`][][^board_map].
 
-[image map]: https://developer.mozilla.org/en-US/docs/Web/HTML/Element/map
 
 [^board_map]: [PICSimLab Board map](https://lcgamboa.github.io/picsimlab_docs/stable/Picturemap.html)
+
+[image map]: https://developer.mozilla.org/en-US/docs/Web/HTML/Element/map
 
 ## Cable
 
