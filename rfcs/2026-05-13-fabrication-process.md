@@ -2,13 +2,14 @@
 
 ## Motivation
 
-We need a structured fabrication workflow for producing PCBs from Circuit JSON using a laser-based fabrication process. The workflow must support both top-side and bottom-side fabrication, operator-assisted alignment, automatic offset correction, stage previews, machine execution, verification checkpoints, and complete job logging.
+We need a structured fabrication workflow for producing PCBs from Circuit JSON using a laser-based fabrication process. The workflow must support both top-side and bottom-side fabrication, operator-assisted alignment, automatic offset correction, stage previews, machine execution, verification checkpoints, soldermask application, cleaning, and complete job logging.
 
-The goal is to make the fabrication process reliable, repeatable, and safe while still allowing manual operator intervention where precision or visual confirmation is required.
+The goal is to make the fabrication process reliable, repeatable, and safe while still allowing manual operator intervention where precision or visual confirmation is required. We want to be able to gradually replace manual steps
+with supervised automatic steps, then eventually fully automatic progression.
 
 ## Overview
 
-The proposed workflow begins with a Circuit JSON upload and generation of fabrication-stage LBRN files. The operator previews the generated PCB job, loads the PCB into a laser jig, performs alignment using low-power jog commands, and then runs the top-side fabrication stages.
+The proposed workflow begins with a Circuit JSON upload and generation of UNALIGNED fabrication-stage LBRN files. The operator previews the generated PCB job, loads the PCB into the carrier, performs alignment using low-power jog commands, and then runs the top-side fabrication stages.
 
 After completing the top side, the system rotates the PCB 180 degrees for bottom-side fabrication. The system verifies orientation using camera-detected LED markers, captures bottom-side alignment offsets, applies those offsets to bottom-side LBRN files, and runs the bottom-side laser stages.
 
@@ -24,13 +25,6 @@ At the end of the process, the operator performs a final inspection and the syst
 - Verify PCB orientation using camera-detected markers.
 - Rotate the PCB between top-side and bottom-side fabrication.
 - Log all relevant fabrication data for debugging and reproducibility.
-
-## Non-Goals
-
-- Fully autonomous alignment without operator input.
-- Fully autonomous visual inspection of completed copper results.
-- Guaranteeing mechanical rotation accuracy without external validation.
-- Replacing the operator’s final accept/reject decision.
 
 ## Proposed Workflow
 
