@@ -38,6 +38,7 @@ Enclosure authoring has two complementary root concepts:
    opening required to use that part.
 
 ```tsx
+import { Fragment } from "react"
 import { enclosure } from "@tscircuit/enclosure"
 
 export const UsbC = (props) => (
@@ -51,13 +52,13 @@ export const UsbC = (props) => (
 )
 
 export default () => (
-  <group>
+  <Fragment>
     <board name="B1" width="50mm" height="36mm">
       <UsbC name="J1" pcbX="22mm" pcbY="0mm" />
     </board>
 
     <enclosure.fdm.box boardRef=".B1" autoCutouts />
-  </group>
+  </Fragment>
 )
 ```
 
@@ -104,10 +105,11 @@ its board through the required `boardRef`. It is not owned by or nested inside
 the board.
 
 ```tsx
+import { Fragment } from "react"
 import { enclosure } from "@tscircuit/enclosure"
 
 export default () => (
-  <group>
+  <Fragment>
     <board name="B1" width="50mm" height="36mm">
       <hole pcbX={-20} pcbY={-13} diameter="3.2mm" />
       <hole pcbX={20} pcbY={-13} diameter="3.2mm" />
@@ -121,14 +123,25 @@ export default () => (
       wallThickness="2mm"
       autoCutouts
     />
-  </group>
+  </Fragment>
 )
 ```
 
-`<group>` is only the single TSX root containing the board and enclosure
-siblings; it is not part of the enclosure model. Code using the programmatic
-circuit API can add them as separate root children. The explicit board selector
-also leaves room for future multi-board assemblies.
+The named `<Fragment>` has normal React Fragment semantics: it contributes no
+host component, transform, selector scope, layout, or emitted record. It merely
+allows the board and enclosure siblings to be returned from one TSX root.
+Named `<Fragment>` is used instead of shorthand `<>...</>` so the source remains
+well-formed XML syntax.
+
+Current core does not yet preserve multiple children from a top-level Fragment:
+its React-element adapter returns only one public root, and its multi-root
+fallback otherwise inserts an implicit `<group subcircuit>`. Supporting this
+temporary form therefore requires core to flatten root Fragment children into a
+transparent root container without creating group/subcircuit semantics. Until
+that fix lands, the reference implementation's `<group>` wrapper is a renderer
+workaround, not the intended product model.
+
+The explicit board selector leaves room for future multi-board assemblies.
 
 The upstream `enclosure.fdm.box` props currently provide `boardRef`, optional
 outer `width`, `height`, and `depth`, and `wallThickness`. The reference
@@ -391,6 +404,117 @@ The general resolver belongs in `@tscircuit/enclosure`; the cable-point library
 should remain focused on connectors. Specialized inference modules can be added
 as experience with each part family grows.
 
+## Physical Assembly (Planned)
+
+An enclosure manufactures the case parts; it does not by itself describe how to
+assemble the finished device. A future imported physical-assembly module should
+own product occurrences and the assembly process:
+
+```tsx
+import { assembly } from "@tscircuit/assembly"
+import { enclosure } from "@tscircuit/enclosure"
+
+<assembly.device name="controller">
+  <board name="B1">...</board>
+  <enclosure.fdm.box boardRef=".B1" />
+  <assembly.harness name="display-fpc" />
+  <assembly.part name="display" />
+
+  <assembly.process>
+    <assembly.step id="install-inserts">
+      <assembly.install part=".heat-set-inserts" into=".case-base" />
+      <assembly.tool type="heat-set-press" temperature="220C" />
+    </assembly.step>
+
+    <assembly.step id="connect-display" after="install-inserts">
+      <assembly.connect from=".display-fpc" to=".B1 > .J3" />
+      <assembly.check type="minimum-bend-radius" value="5mm" />
+    </assembly.step>
+
+    <assembly.step id="close-case" after="connect-display">
+      <assembly.fastener part=".case-screws" torque="0.4N*m" />
+    </assembly.step>
+  </assembly.process>
+</assembly.device>
+```
+
+The spelling is illustrative. Like `enclosure`, the assembly API should
+incubate as an imported lowercase dotted namespace rather than a global
+intrinsic.
+
+### Product structure and process ownership
+
+The physical assembly combines:
+
+- the main board and any daughterboards;
+- generated enclosure parts;
+- displays and controls mounted independently of a PCB;
+- wiring harnesses, ribbon cables, antennas, and strain relief;
+- fasteners, inserts, clips, seals, labels, adhesives, and other purchased or
+  consumed items; and
+- the connections and final transforms among those occurrences.
+
+It owns the manufacturing view of the complete product:
+
+- an engineering/product structure and manufacturing BoM (MBOM);
+- an ordered or dependency-based Bill of Process (BOP);
+- allocation of parts and consumables to operations;
+- tools, fixtures, torque, temperature, cure time, and other parameters;
+- work instructions and intermediate-state checks; and
+- final-device assembly artifacts.
+
+The process should be a dependency graph rather than only an array: independent
+operations may occur in parallel, while closure or fastening operations depend
+on earlier installation and connection steps.
+
+### Assembly checks versus enclosure checks
+
+Enclosure checks are design-for-manufacturing rules for enclosure parts, such as
+FDM overhangs, CNC corner radii, laser kerf, and minimum walls.
+
+Physical-assembly checks are design-for-assembly rules over changing assembly
+states, including:
+
+- insertion and removal paths;
+- tool and hand access;
+- fastener reach and torque access;
+- connector accessibility at the step when a cable is attached;
+- cable routing and minimum bend radius;
+- whether an earlier operation blocks a later one;
+- whether the lid closes after harness installation; and
+- whether every MBOM occurrence is allocated to a process operation.
+
+This mirrors industrial manufacturing planning: CAD/product structure describes
+what the product is, while an MBOM and BOP describe what is consumed and how the
+product is assembled.
+
+### Why not `<group>` or the existing `<cadassembly>`?
+
+`<group>` is already an ECAD and layout abstraction. It can emit
+`source_group`, `pcb_group`, and `schematic_group` records; establish subcircuit
+and selector scope; expose ports and connections; apply schematic/PCB
+grid/flex/packing; and control routing rules and autorouters. A root group is
+automatically a subcircuit. Wrapping a board and enclosure in it therefore says
+they share electrical/layout scope, not merely that they belong to one physical
+product.
+
+Overloading `<group>` with assembly-process meaning would also make existing
+group behavior harder to reason about and still would not provide MBOM
+allocation, ordered operations, tools, harness connections, or intermediate
+assembly states.
+
+The existing `<cadassembly>` is narrower in the other direction. It is a
+component-local primitive container for composing multiple `<cadmodel>` children
+and carries `originalLayer` mirroring semantics. It emits no assembly record and
+applies no product-assembly or process-planning algorithms. Reusing its name for
+finished-device assembly would conflate CAD representation with real-world
+assembly and substantially change existing meaning.
+
+A React Fragment is therefore the least-opinionated temporary wrapper. It is
+deliberately insufficient as the permanent solution because it has no identity,
+product structure, process, DRC, or export semantics; those belong to the future
+physical-assembly module.
+
 ## Development Standards
 
 ### Imported dotted namespace
@@ -422,6 +546,8 @@ graphs must not be required to express an enclosure.
 Complex structures should prefer nested elements and ordinary
 distance/enum/string attributes. Dotted built-in names such as
 `enclosure.fdm.box` and `enclosure.cutoutaperture` are valid XML element names.
+Where a transparent temporary root is needed, examples use the named
+`<Fragment>` form rather than non-XML shorthand `<>...</>`.
 
 ### Circuit JSON and artifact boundary
 
@@ -501,7 +627,22 @@ These decisions should follow implementation experience rather than precede it.
 
 ## Plan
 
-### 1. Migrate the reference implementation
+### 1. Support transparent root Fragments
+
+Update core's React root handling so a top-level `<Fragment>` preserves every
+child without constructing an implicit electrical `<group>`:
+
+- flatten Fragment children into a transparent root container;
+- render all root children;
+- keep selectors and board lookup available across those children;
+- emit no source, schematic, PCB, CAD, or subcircuit record for the Fragment;
+  and
+- cover a board plus `enclosure.fdm.box` in a root-Fragment regression test.
+
+This is a renderer prerequisite for the temporary composition shown in this
+RFC, not a new product-assembly model.
+
+### 2. Migrate the reference implementation
 
 Move or replicate the working `pcb-enclosure` implementation into
 `@tscircuit/enclosure`:
@@ -517,7 +658,7 @@ Move or replicate the working `pcb-enclosure` implementation into
 This phase is complete when the existing prefab-board reference renders and
 exports equivalent enclosure parts from `@tscircuit/enclosure`.
 
-### 2. Integrate enclosure preview rendering
+### 3. Integrate enclosure preview rendering
 
 Add an artifact-oriented preview path:
 
@@ -532,7 +673,7 @@ The integration may use an existing CAD asset/model reference to the generated
 GLB, but it must not serialize enclosure topology or CSG operations into Circuit
 JSON.
 
-### 3. Consolidate connector aperture placement
+### 4. Consolidate connector aperture placement
 
 Migrate the connector behavior into the explicit interaction-surface model:
 
@@ -543,7 +684,7 @@ Migrate the connector behavior into the explicit interaction-surface model:
 - validate enclosure-face reach using component/CAD bounds; and
 - report unresolved placement rather than creating a fallback opening.
 
-### 4. Prototype non-connector interaction inference
+### 5. Prototype non-connector interaction inference
 
 Design the XML-compatible interaction vocabulary and implement focused
 prototypes for:
@@ -558,7 +699,25 @@ Each prototype should resolve the same center/direction/role abstraction and
 demonstrate explicit override, part metadata, specialized inference, and
 placement fallback independently.
 
-### 5. Expand manufacturing outputs and constructions
+### 6. Prototype the physical-assembly module
+
+Create an imported, lowercase dotted `assembly` namespace, initially in an
+experimental `@tscircuit/assembly` module:
+
+- model device-level occurrences including boards, daughterboards, enclosure
+  parts, displays, harnesses, ribbon cables, hardware, and consumables;
+- distinguish product structure/eBOM, MBOM, BOP, and tools/resources;
+- allocate occurrences to dependency-ordered assembly operations;
+- represent install, connect, fasten, route, and check operations;
+- validate intermediate assembly states, tool access, insertion paths, cable
+  bend radius, and operation completeness; and
+- emit assembly-process artifacts and work instructions without overloading
+  `<group>` or the existing component-local `<cadassembly>`.
+
+The first prototype should assemble the reference PCB, generated enclosure,
+hardware, and at least one cable- or display-like external occurrence.
+
+### 7. Expand manufacturing outputs and constructions
 
 After the migration and interaction model are proven:
 
