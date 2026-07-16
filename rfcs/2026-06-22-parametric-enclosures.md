@@ -20,11 +20,11 @@ automatically. Moving a connector moves its opening; moving or adding a mounting
 hole moves or adds its support; changing a component body updates enclosure
 clearance checks.
 
-The enclosure system should preserve the existing division between electrical
-and mechanical concerns. Circuit JSON remains the authoritative rendered board
-input. `@tscircuit/enclosure` consumes that input plus enclosure-specific TSX and
-exports mechanical artifacts. It should not require circuit authors to reproduce
-board dimensions in a second design.
+Circuit JSON is the authoritative rendered board and CAD output. Core renders
+the electrical board; `@tscircuit/enclosure` consumes that output plus the live
+assembly/enclosure TSX and appends generated CAD models using existing Circuit
+JSON records. Circuit authors should not reproduce board dimensions in a second
+design.
 
 ## Summary
 
@@ -38,8 +38,7 @@ Enclosure authoring has two complementary root concepts:
    opening required to use that part.
 
 ```tsx
-import { Fragment } from "react"
-import { enclosure } from "@tscircuit/enclosure"
+import { assembly, enclosure } from "@tscircuit/enclosure"
 
 export const UsbC = (props) => (
   <connector {...props}>
@@ -52,13 +51,13 @@ export const UsbC = (props) => (
 )
 
 export default () => (
-  <Fragment>
+  <assembly.device name="controller">
     <board name="B1" width="50mm" height="36mm">
       <UsbC name="J1" pcbX="22mm" pcbY="0mm" />
     </board>
 
     <enclosure.fdm.box boardRef=".B1" autoCutouts />
-  </Fragment>
+  </assembly.device>
 )
 ```
 
@@ -73,7 +72,6 @@ The working `pcb-enclosure` reference implementation currently demonstrates:
 - PCB mounting posts or external corner fastening ears;
 - automatic placement of explicitly declared connector apertures;
 - visible, BoM-able screws and bushings;
-- render-time and exhaustive assembly checks; and
 - JSCAD-backed preview and STL output.
 
 `@tscircuit/enclosure` will replace that reference package. The public API and
@@ -91,25 +89,30 @@ rules, and output selection.
 types at:
 
 ```ts
+assemblyProps.device
 enclosureProps.fdm.box
 enclosureProps.cutoutaperture
 ```
 
 Those values validate props; they are not renderable React components. The
-renderable lowercase `enclosure` namespace will be exported by
-`@tscircuit/enclosure`. The working reference implementation currently
-constructs the namespace in `pcb-enclosure/register`.
+renderable lowercase `assembly` and `enclosure` namespaces will be exported by
+`@tscircuit/enclosure`. The working reference implementation constructs them in
+`pcb-enclosure`.
 
-`<enclosure.fdm.box />` is an assembly-level sibling of `<board />` and selects
-its board through the required `boardRef`. It is not owned by or nested inside
-the board.
+`<assembly.device>` is the product-level root. Its initial implementation is a
+no-output host wrapper that gives the physical product an identity and contains
+the board, enclosure, and later assembly occurrences without creating
+electrical group, subcircuit, transform, or layout semantics.
+
+`<enclosure.fdm.box />` is a sibling of `<board />` inside that wrapper and
+selects its board through the required `boardRef`. It is not owned by or nested
+inside the board.
 
 ```tsx
-import { Fragment } from "react"
-import { enclosure } from "@tscircuit/enclosure"
+import { assembly, enclosure } from "@tscircuit/enclosure"
 
 export default () => (
-  <Fragment>
+  <assembly.device name="controller">
     <board name="B1" width="50mm" height="36mm">
       <hole pcbX={-20} pcbY={-13} diameter="3.2mm" />
       <hole pcbX={20} pcbY={-13} diameter="3.2mm" />
@@ -123,23 +126,15 @@ export default () => (
       wallThickness="2mm"
       autoCutouts
     />
-  </Fragment>
+  </assembly.device>
 )
 ```
 
-The named `<Fragment>` has normal React Fragment semantics: it contributes no
-host component, transform, selector scope, layout, or emitted record. It merely
-allows the board and enclosure siblings to be returned from one TSX root.
-Named `<Fragment>` is used instead of shorthand `<>...</>` so the source remains
-well-formed XML syntax.
-
-Current core does not yet preserve multiple children from a top-level Fragment:
-its React-element adapter returns only one public root, and its multi-root
-fallback otherwise inserts an implicit `<group subcircuit>`. Supporting this
-temporary form therefore requires core to flatten root Fragment children into a
-transparent root container without creating group/subcircuit semantics. Until
-that fix lands, the reference implementation's `<group>` wrapper is a renderer
-workaround, not the intended product model.
+Because `assembly.device` is one explicit root, enclosure composition does not
+depend on core's top-level Fragment or implicit multi-root `<group>` behavior.
+The wrapper remains as an external no-output tree node so imported assembly and
+enclosure metadata is available to the artifact renderer while canonical
+Circuit JSON stays unchanged.
 
 The explicit board selector leaves room for future multi-board assemblies.
 
@@ -225,22 +220,17 @@ appropriate:
 The output layer may provide individual manufacturing parts, a complete
 assembly, a mechanical BoM, and a preview GLB.
 
-### Design-rule and assembly checks
+### Assembly checks are deferred
 
-The current implementation uses two complementary checks over the same extracted
-component-body boxes:
-
-- analytic checks for collisions or insufficient clearance against walls,
-  columns, screw channels, bosses, and the lid lip; and
-- mesh checks for seated intersections and the swept board-insertion path.
+The reference implementation no longer performs enclosure collision or
+insertion-path DRC. Those checks depend on product occurrences, assembly state,
+motion, and intentional interfaces, so they will be reintroduced under
+`assembly.device` rather than attached to an isolated enclosure model.
 
 Top- and bottom-mounted bodies, Z offsets, through-hole leads, clips, and other
-far-side projections contribute to the appropriate cavity and standoff
-clearances.
-
-Components may intentionally pass through a wall or lid only where an explicit
-aperture serves them. A resolved aperture exempts only the intended intersection;
-it does not disable unrelated collision checks.
+far-side projections still contribute to enclosure sizing and standoff
+clearance. Invalid dimensions and unresolved required geometry continue to
+surface as rendering errors.
 
 ### Current reference coverage
 
@@ -363,15 +353,15 @@ For a side-entry connector:
 2. transformed `insertionDirection` selects the mating face when available;
 3. cable-point inference supplies board-plane x/y and otherwise helps select the
    nearest reachable wall;
-4. part-authored interaction metadata supplies local z;
-5. the resolver transforms the local interaction into board coordinates;
-6. the aperture profile supplies shape, size, and margin; and
-7. body/CAD geometry helps validate wall reach and unresolved placement, but
+4. the current fallback centers side openings on the relevant CAD/body height;
+5. the aperture profile supplies shape, size, and margin; and
+6. body/CAD geometry helps validate wall reach and unresolved placement, but
    never synthesizes an aperture.
 
-CAD/body height may suggest a missing z for a declared aperture, but it is not
-authoritative because a connector opening need not be centered in its housing.
-An unresolved center should surface as an enclosure error or warning.
+The public aperture element is not extended with placement props. CAD/body
+centering is only the current fallback because a connector opening need not be
+centered in its housing. Authored placement belongs in the separate interaction
+surface vocabulary.
 
 ### Non-connector placement: planned design
 
@@ -404,15 +394,15 @@ The general resolver belongs in `@tscircuit/enclosure`; the cable-point library
 should remain focused on connectors. Specialized inference modules can be added
 as experience with each part family grows.
 
-## Physical Assembly (Planned)
+## Assembly Device and Physical Assembly
 
 An enclosure manufactures the case parts; it does not by itself describe how to
-assemble the finished device. A future imported physical-assembly module should
-own product occurrences and the assembly process:
+assemble the finished device. `assembly.device` initially supplies the
+product-level root and identity from `@tscircuit/enclosure`; its process and
+manufacturing semantics remain planned:
 
 ```tsx
-import { assembly } from "@tscircuit/assembly"
-import { enclosure } from "@tscircuit/enclosure"
+import { assembly, enclosure } from "@tscircuit/enclosure"
 
 <assembly.device name="controller">
   <board name="B1">...</board>
@@ -438,9 +428,10 @@ import { enclosure } from "@tscircuit/enclosure"
 </assembly.device>
 ```
 
-The spelling is illustrative. Like `enclosure`, the assembly API should
-incubate as an imported lowercase dotted namespace rather than a global
-intrinsic.
+The process children are illustrative. Like `enclosure`, the assembly API
+incubates as an imported lowercase dotted namespace rather than a global
+intrinsic. It may move to a dedicated `@tscircuit/assembly` package after its
+product and process model stabilizes.
 
 ### Product structure and process ownership
 
@@ -510,21 +501,25 @@ applies no product-assembly or process-planning algorithms. Reusing its name for
 finished-device assembly would conflate CAD representation with real-world
 assembly and substantially change existing meaning.
 
-A React Fragment is therefore the least-opinionated temporary wrapper. It is
-deliberately insufficient as the permanent solution because it has no identity,
-product structure, process, DRC, or export semantics; those belong to the future
-physical-assembly module.
+`assembly.device` is therefore the explicit product root. Its initial no-output
+implementation is intentionally small, while later product structure, process,
+DRC, and export semantics can attach to the same wrapper without overloading
+ECAD grouping.
 
 ## Development Standards
 
 ### Imported dotted namespace
 
-Enclosure development follows a React Strict DOM-like imported namespace:
+Assembly and enclosure development follow React Strict DOM-like imported
+namespaces:
 
 ```tsx
-import { enclosure } from "@tscircuit/enclosure"
+import { assembly, enclosure } from "@tscircuit/enclosure"
 
-<enclosure.fdm.box boardRef=".B1" />
+<assembly.device>
+  <board name="B1" />
+  <enclosure.fdm.box boardRef=".B1" />
+</assembly.device>
 ```
 
 The dots are ordinary JavaScript property access, not class inheritance.
@@ -545,37 +540,51 @@ graphs must not be required to express an enclosure.
 
 Complex structures should prefer nested elements and ordinary
 distance/enum/string attributes. Dotted built-in names such as
-`enclosure.fdm.box` and `enclosure.cutoutaperture` are valid XML element names.
-Where a transparent temporary root is needed, examples use the named
-`<Fragment>` form rather than non-XML shorthand `<>...</>`.
+`assembly.device`, `enclosure.fdm.box`, and `enclosure.cutoutaperture` are valid
+XML element names.
 
-### Circuit JSON and artifact boundary
+### Circuit JSON product model
 
-Canonical Circuit JSON is a read-only board/electronics input:
+Canonical Circuit JSON carries the rendered electronics and generated preview
+CAD. Assembly and interface authoring intent remains in imported TSX:
 
 ```text
-canonical circuit.json       imported enclosure.* TSX
-          \                            /
-           \                          /
-              @tscircuit/enclosure
-                       |
-          internal geometry rendering
-             /         |          \
-          STEP        GLB       3MF/STL/DXF
+board/component Circuit JSON       imported assembly/enclosure TSX
+                \                           /
+                 \                         /
+                    @tscircuit/enclosure
+                             |
+                  canonical product Circuit JSON
+                    /                    \
+       cad_component.model_jscad     manufacturing exports
+                    |                 STEP / STL / 3MF / DXF
+          circuit-json-to-gltf
+                    |
+              GLB / PoppyGL
 ```
 
-During this phase:
+No Circuit JSON schema change is required. Each generated case part or hardware
+occurrence uses the existing record trio:
 
-- no enclosure records are added to canonical Circuit JSON;
-- no persisted enclosure sidecar or intermediate representation is required;
-- internal TypeScript structures are implementation details;
-- JSCAD operation trees are not persisted as interchange; and
-- Circuit JSON may optionally reference the rendered enclosure GLB through
-  existing CAD model/asset fields for combined viewing.
+- a synthetic `source_component` for identity and display name;
+- a zero-size, non-obstructing, `do_not_place` synthetic `pcb_component`; and
+- a `cad_component` whose existing `model_jscad` field contains the serializable
+  JSCAD operation tree.
 
-Whether a persisted enclosure model, richer Circuit JSON relationship, or
-bidirectional ECAD/MCAD-style proposal protocol is eventually needed remains
-open.
+The synthetic source/PCB records are compatibility scaffolding required by the
+current `cad_component` ownership contract. They are not semantically PCB
+components and must remain excluded from placement, obstacle, and manufacturing
+analysis. A future generic CAD-owner relationship may remove this compromise,
+but this RFC does not require a Circuit JSON library change.
+
+Serialized JSCAD operation trees are an allowed Circuit JSON CAD
+representation. They are rendered by `circuit-json-to-gltf` and survive worker
+boundaries, cached build output, saved `circuit.json`, and static rendering.
+They are not the editable enclosure-authoring API: the assembly/enclosure TSX
+and design rules remain the source of intent.
+
+No separate preview-artifact protocol or enclosure sidecar is required.
+Individual manufacturing outputs remain ordinary referenced/exported files.
 
 ### Geometry backend and shape style
 
@@ -605,20 +614,19 @@ APIs must not repeat the `rotated_rect`/`rotated_pill` discriminant pattern.
 ### Distribution
 
 `@tscircuit/enclosure` replaces the `pcb-enclosure` reference package as the
-long-term implementation and distribution home. Projects opt in by importing
-its namespace. Projects that do not import it remain unchanged.
+long-term implementation and distribution home. During incubation it exports
+both `assembly` and `enclosure`; `assembly` may later move to a dedicated
+package. Projects that do not import these namespaces remain unchanged.
 
-The only planned Circuit JSON integration is an optional reference to a rendered
-enclosure GLB. All other durable outputs are standard mechanical artifacts.
+Projects importing these namespaces append canonical CAD records using existing
+Circuit JSON shapes. Projects that do not import them continue producing the
+existing electronics records unchanged.
 
 ### Explicitly deferred decisions
 
 This RFC does not decide:
 
 - whether any dotted namespace components later become global intrinsics;
-- whether enclosure data eventually gains a canonical intermediate
-  representation;
-- whether Circuit JSON later carries more than a rendered GLB reference;
 - how bidirectional enclosure-to-PCB change proposals are represented;
 - the final taxonomy for every construction and manufacturing process; or
 - the final kernel for advanced parametric geometry.
@@ -627,55 +635,21 @@ These decisions should follow implementation experience rather than precede it.
 
 ## Plan
 
-### 1. Support transparent root Fragments
+### 1. Establish `assembly.device`
 
-Update core's React root handling so a top-level `<Fragment>` preserves every
-child without constructing an implicit electrical `<group>`:
+Add the React-independent `assemblyProps.device` contract to
+`@tscircuit/props` and export the imported `assembly.device` component from
+`pcb-enclosure`, later `@tscircuit/enclosure`:
 
-- flatten Fragment children into a transparent root container;
-- render all root children;
-- keep selectors and board lookup available across those children;
-- emit no source, schematic, PCB, CAD, or subcircuit record for the Fragment;
-  and
-- cover a board plus `enclosure.fdm.box` in a root-Fragment regression test.
+- accept an optional product-level `name`;
+- contain boards, enclosure specifications, and later assembly occurrences;
+- retain children in the renderer tree;
+- emit no source, schematic, PCB, CAD, or subcircuit record; and
+- avoid core Fragment and implicit electrical-group semantics.
 
-This is a renderer prerequisite for the temporary composition shown in this
-RFC, not a new product-assembly model.
+### 2. Consolidate connector aperture placement
 
-### 2. Migrate the reference implementation
-
-Move or replicate the working `pcb-enclosure` implementation into
-`@tscircuit/enclosure`:
-
-- expose the merged `enclosure.fdm.box` and
-  `enclosure.cutoutaperture` contracts;
-- preserve current FDM box sizing, supports, hardware, DRC, and exports;
-- consume canonical Circuit JSON as read-only board input;
-- retain only package-private renderer/host adapters;
-- remove the legacy public `<enclosure>` intrinsic surface; and
-- preserve explicit-aperture behavior.
-
-This phase is complete when the existing prefab-board reference renders and
-exports equivalent enclosure parts from `@tscircuit/enclosure`.
-
-### 3. Integrate enclosure preview rendering
-
-Add an artifact-oriented preview path:
-
-1. core renders the board to canonical Circuit JSON;
-2. `@tscircuit/enclosure` consumes that Circuit JSON and the imported
-   `enclosure.*` TSX;
-3. the enclosure renderer produces a GLB;
-4. `circuit-json-to-gltf` continues to produce the PCB/component scene; and
-5. RunFrame/PoppyGL presents the PCB and enclosure together.
-
-The integration may use an existing CAD asset/model reference to the generated
-GLB, but it must not serialize enclosure topology or CSG operations into Circuit
-JSON.
-
-### 4. Consolidate connector aperture placement
-
-Migrate the connector behavior into the explicit interaction-surface model:
+Migrate connector behavior into the explicit interaction-surface model:
 
 - require `enclosure.cutoutaperture`;
 - preserve transformed insertion-direction precedence;
@@ -683,6 +657,39 @@ Migrate the connector behavior into the explicit interaction-surface model:
 - source z from the part's interaction metadata;
 - validate enclosure-face reach using component/CAD bounds; and
 - report unresolved placement rather than creating a fallback opening.
+
+Keep `enclosure.cutoutaperture` exactly aligned with its upstream props schema.
+Define the XML-compatible interaction vocabulary separately before exposing
+authored interaction-position overrides.
+
+### 3. Migrate the reference implementation
+
+Move or replicate the working `pcb-enclosure` implementation into
+`@tscircuit/enclosure`:
+
+- expose the merged `enclosure.fdm.box` and
+  `enclosure.cutoutaperture` contracts plus `assembly.device`;
+- preserve current FDM box sizing, supports, hardware, and exports;
+- consume the rendered board records and append existing source/PCB/CAD records
+  carrying `model_jscad`;
+- retain only package-private renderer/host adapters;
+- remove the legacy public `<enclosure>` intrinsic surface; and
+- preserve explicit-aperture behavior.
+
+This phase is complete when the existing prefab-board reference renders and
+exports equivalent enclosure parts from `@tscircuit/enclosure`.
+
+### 4. Integrate canonical enclosure rendering
+
+1. core renders the board and applies registered Circuit JSON postprocessors;
+2. `@tscircuit/enclosure` consumes the board records and imported
+   `assembly.*`/`enclosure.*` TSX;
+3. the enclosure renderer appends synthetic source/PCB owners and
+   `cad_component.model_jscad` records using the existing schema;
+4. `circuit-json-to-gltf` executes the serialized plans and composes the
+   PCB/component/enclosure scene; and
+5. RunFrame, CLI workers, saved builds, and static viewers consume the same
+   canonical Circuit JSON without an out-of-band artifact channel.
 
 ### 5. Prototype non-connector interaction inference
 
@@ -699,10 +706,10 @@ Each prototype should resolve the same center/direction/role abstraction and
 demonstrate explicit override, part metadata, specialized inference, and
 placement fallback independently.
 
-### 6. Prototype the physical-assembly module
+### 6. Expand `assembly.device`
 
-Create an imported, lowercase dotted `assembly` namespace, initially in an
-experimental `@tscircuit/assembly` module:
+Expand the imported, lowercase dotted `assembly` namespace incubating in
+`@tscircuit/enclosure`:
 
 - model device-level occurrences including boards, daughterboards, enclosure
   parts, displays, harnesses, ribbon cables, hardware, and consumables;
