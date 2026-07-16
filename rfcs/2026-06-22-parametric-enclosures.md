@@ -130,11 +130,9 @@ export default () => (
 )
 ```
 
-Because `assembly.device` is one explicit root, enclosure composition does not
-depend on core's top-level Fragment or implicit multi-root `<group>` behavior.
-The wrapper remains as an external no-output tree node so imported assembly and
-enclosure metadata is available to the artifact renderer while canonical
-Circuit JSON stays unchanged.
+`assembly.device` is the single explicit root. It remains an external no-output
+tree node so imported assembly and enclosure metadata is available to the
+renderer without creating electrical group or subcircuit semantics.
 
 The explicit board selector leaves room for future multi-board assemblies.
 
@@ -645,7 +643,7 @@ Add the React-independent `assemblyProps.device` contract to
 - contain boards, enclosure specifications, and later assembly occurrences;
 - retain children in the renderer tree;
 - emit no source, schematic, PCB, CAD, or subcircuit record; and
-- avoid core Fragment and implicit electrical-group semantics.
+- avoid implicit electrical-group semantics.
 
 ### 2. Consolidate connector aperture placement
 
