@@ -94,10 +94,8 @@ export type SimulationSweepTargetProperty =
   | "inductance"
   | "temperature"
 
-interface SimulationParameterSweepCommonProps {
+interface AnalogSimulationParameterSweepCommonProps {
   name: string
-  /** Selector for exactly one <analogsimulation />. */
-  simulation: string
   /** Selector for exactly one source component. */
   target: string
   targetProperty: SimulationSweepTargetProperty
@@ -109,8 +107,8 @@ interface SimulationParameterSweepCommonProps {
   stopOnError?: boolean
 }
 
-export interface SimulationListParameterSweepProps
-  extends SimulationParameterSweepCommonProps {
+export interface AnalogSimulationListParameterSweepProps
+  extends AnalogSimulationParameterSweepCommonProps {
   sweepType?: "list"
   /** Numbers use the base unit implied by targetProperty. */
   sweepPoints: PhysicalQuantityInput[]
@@ -120,8 +118,8 @@ export interface SimulationListParameterSweepProps
   sweepPointCount?: never
 }
 
-export interface SimulationLinearParameterSweepProps
-  extends SimulationParameterSweepCommonProps {
+export interface AnalogSimulationLinearParameterSweepProps
+  extends AnalogSimulationParameterSweepCommonProps {
   sweepType: "linear"
   sweepStart: PhysicalQuantityInput
   sweepStop: PhysicalQuantityInput
@@ -130,8 +128,8 @@ export interface SimulationLinearParameterSweepProps
   sweepPointCount?: never
 }
 
-export interface SimulationLogParameterSweepProps
-  extends SimulationParameterSweepCommonProps {
+export interface AnalogSimulationLogParameterSweepProps
+  extends AnalogSimulationParameterSweepCommonProps {
   sweepType: "decade" | "octave"
   sweepStart: PhysicalQuantityInput
   sweepStop: PhysicalQuantityInput
@@ -140,10 +138,10 @@ export interface SimulationLogParameterSweepProps
   sweepStep?: never
 }
 
-export type SimulationParameterSweepProps =
-  | SimulationListParameterSweepProps
-  | SimulationLinearParameterSweepProps
-  | SimulationLogParameterSweepProps
+export type AnalogSimulationParameterSweepProps =
+  | AnalogSimulationListParameterSweepProps
+  | AnalogSimulationLinearParameterSweepProps
+  | AnalogSimulationLogParameterSweepProps
 
 export type ProbeReducerOperation =
   | "mean"
@@ -167,10 +165,8 @@ export type ComplexProjection =
   | "real"
   | "imaginary"
 
-interface SimulationMeasurementCommonProps {
+interface AnalogSimulationChildProps {
   name: string
-  /** Selector for exactly one <analogsimulation />. */
-  simulation: string
 }
 
 interface TransientMeasurementWindowProps {
@@ -182,10 +178,9 @@ interface TransientMeasurementWindowProps {
   steadyStateCycles?: number
 }
 
-export interface ProbeReducerMeasurementProps
-  extends SimulationMeasurementCommonProps,
+export interface AnalogSimulationProbeReductionProps
+  extends AnalogSimulationChildProps,
     TransientMeasurementWindowProps {
-  measurementType: "probe_reducer"
   /** Selector for one voltage or current probe. */
   probe: string
   operation: ProbeReducerOperation
@@ -196,19 +191,17 @@ export interface ProbeReducerMeasurementProps
   thresholdEdge?: ThresholdEdge
 }
 
-export interface AveragePowerMeasurementProps
-  extends SimulationMeasurementCommonProps,
+export interface AnalogSimulationAveragePowerProps
+  extends AnalogSimulationChildProps,
     TransientMeasurementWindowProps {
-  measurementType: "average_power"
   voltageProbe: string
   currentProbe: string
 }
 
-export interface ExpressionMeasurementProps
-  extends SimulationMeasurementCommonProps {
-  measurementType: "expression"
+export interface AnalogSimulationDerivedScalarProps
+  extends AnalogSimulationChildProps {
   /**
-   * Restricted arithmetic expression. References use measurement("name").
+   * Restricted arithmetic expression. References use scalar("name").
    * JavaScript evaluation is forbidden.
    */
   expression: string
@@ -216,10 +209,13 @@ export interface ExpressionMeasurementProps
   outputUnit: string
 }
 
-export type SimulationMeasurementProps =
-  | ProbeReducerMeasurementProps
-  | AveragePowerMeasurementProps
-  | ExpressionMeasurementProps
+/** Props exposed through the analogsimulation namespace. */
+export interface AnalogSimulationNamespaceProps {
+  parametersweep: AnalogSimulationParameterSweepProps
+  probereduction: AnalogSimulationProbeReductionProps
+  averagepower: AnalogSimulationAveragePowerProps
+  derivedscalar: AnalogSimulationDerivedScalarProps
+}
 
 /** Additive source props. DC bias, transient waveform, and AC excitation coexist. */
 export interface VoltageSourceSimulationProps {

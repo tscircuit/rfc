@@ -38,11 +38,18 @@ tscircuit should expose four direct SPICE analyses through
 - `spice_ac_analysis`
 - `spice_transient_analysis`
 
-An outer parameter sweep and measurements should be separate intrinsic
-elements:
+Sweep and scalar-derivation behavior should be exposed as namespaced children:
 
-- `<simulationparametersweep />`
-- `<simulationmeasurement />`
+- `<analogsimulation.parametersweep />`
+- `<analogsimulation.probereduction />`
+- `<analogsimulation.averagepower />`
+- `<analogsimulation.derivedscalar />`
+
+Containment associates each child with its parent analysis, so these children do
+not need a second selector back to `<analogsimulation />`. There is deliberately
+no generic `<simulationmeasurement />` intrinsic; the public element name states
+whether it reduces a probe, computes average power, or combines existing
+scalars.
 
 This design makes the following decisions:
 
@@ -73,6 +80,8 @@ The contract follows the tscircuit handbook and current repository guidance:
   for every enum string.
 - Use one named-argument object for functions that otherwise need more than two
   parameters.
+- Namespace related child behaviors under `analogsimulation`, following the
+  direction established by the enclosure and assembly prop namespaces.
 - Use `name` as stable circuit identity.
 - Use `number | string` with unit-aware parsing for physical quantities.
 - Preserve concrete domain names and stable IDs across package boundaries.
@@ -100,6 +109,18 @@ An analysis is not a chart. A chart is one rendering of analysis or measurement
 results.
 
 ## 4. Public JSX API
+
+The aggregate package should export a lowercase `analogsimulation` namespace
+value for the member elements:
+
+```tsx
+import { analogsimulation } from "tscircuit"
+```
+
+The existing `<analogsimulation />` spelling remains an intrinsic element;
+lowercase JSX member syntax resolves `analogsimulation.parametersweep` and the
+other children through the imported namespace value. Environments that inject
+tscircuit globals may provide this namespace automatically.
 
 ### 4.1 Common `<analogsimulation />` props
 
@@ -227,16 +248,15 @@ nonzero `acMagnitude` unless the circuit model provides another AC excitation.
   spiceEngine="ngspice"
   duration="10ms"
   timePerStep="1us"
-/>
-
-<simulationparametersweep
-  name="load-sweep"
-  simulation=".load-transient"
-  target=".Iload"
-  targetProperty="current"
-  sweepPoints={["1mA", "10mA", "100mA", "500mA", "1A"]}
-  xAxisScale="log"
-/>
+>
+  <analogsimulation.parametersweep
+    name="load-sweep"
+    target=".Iload"
+    targetProperty="current"
+    sweepPoints={["1mA", "10mA", "100mA", "500mA", "1A"]}
+    xAxisScale="log"
+  />
+</analogsimulation>
 ```
 
 Common props:
@@ -244,7 +264,6 @@ Common props:
 | Prop | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `name` | `string` | none | Stable sweep identity |
-| `simulation` | `string` | none | Selector resolving to one analog simulation |
 | `target` | `string` | none | Selector resolving to one source component |
 | `targetProperty` | target-property enum | none | Property overridden only for simulation |
 | `sweepType` | `list \| linear \| decade \| octave` | `list` | Coordinate generator |
@@ -268,21 +287,24 @@ Sweep mode rules:
 `xAxisScale` defaults to `log` for decade/octave coordinate generators and
 `linear` for list/linear generators. It may be overridden for list sweeps.
 
-Exactly one outer sweep may reference an experiment in MVP. Multi-dimensional
-or nested sweeps are a future extension.
+At most one `<analogsimulation.parametersweep />` child is allowed per parent in
+MVP. Multi-dimensional or nested sweeps are a future extension.
 
-If there is no linked measurement, `retainInnerResults` must be true. Otherwise
-the sweep would intentionally retain no output.
+If the parent contains no scalar-producing child, `retainInnerResults` must be
+true. Otherwise the sweep would intentionally retain no output.
 
-### 4.7 Measurements
+### 4.7 Scalar derivations
 
-#### Probe reducer
+Scalar derivations are direct children of `<analogsimulation>`. Their specific
+element names prevent them from looking like alternative probes: probes select
+circuit signals, while these children reduce or combine the results produced
+for those probes.
+
+#### Probe reduction
 
 ```tsx
-<simulationmeasurement
+<analogsimulation.probereduction
   name="vout-average"
-  simulation=".load-transient"
-  measurementType="probe_reducer"
   probe=".Vout"
   operation="mean"
   windowStartTime="8ms"
@@ -315,10 +337,8 @@ are never replaced.
 #### Average power
 
 ```tsx
-<simulationmeasurement
+<analogsimulation.averagepower
   name="input-power"
-  simulation=".load-transient"
-  measurementType="average_power"
   voltageProbe=".VinProbe"
   currentProbe=".IinProbe"
   steadyStateCycles={5}
@@ -333,14 +353,12 @@ Positive current flows from a current probe's positive endpoint to its negative
 endpoint. Positive average power means absorbed power under the passive sign
 convention.
 
-#### Expression
+#### Derived scalar
 
 ```tsx
-<simulationmeasurement
+<analogsimulation.derivedscalar
   name="efficiency"
-  simulation=".load-transient"
-  measurementType="expression"
-  expression={'100 * abs(measurement("output-power")) / abs(measurement("input-power"))'}
+  expression={'100 * abs(scalar("output-power")) / abs(scalar("input-power"))'}
   outputQuantity="efficiency"
   outputUnit="%"
 />
@@ -358,12 +376,12 @@ primary         := number
                  | "abs(" expression ")"
                  | "min(" expression "," expression ")"
                  | "max(" expression "," expression ")"
-                 | "measurement(" quoted_measurement_name ")"
+                 | "scalar(" quoted_scalar_name ")"
 ```
 
 JavaScript `eval`, property access, arbitrary function calls, and global names
-are forbidden. Core resolves referenced measurement names to stable IDs, rejects
-missing references, and rejects dependency cycles before execution.
+are forbidden. Core resolves referenced scalar names to stable measurement IDs,
+rejects missing references, and rejects dependency cycles before execution.
 `outputQuantity` and `outputUnit` are required because the expression evaluator
 does not attempt dimensional inference.
 
@@ -621,6 +639,10 @@ Core resolves and fully expands the public sweep before execution:
 ```
 
 ### 8.3 Measurement definitions
+
+`simulation_measurement` is a low-level Circuit JSON relationship, not a public
+JSX element. Core creates it from the specific namespaced child that the user
+authored.
 
 A probe reducer links exactly one voltage or current probe:
 
@@ -917,7 +939,8 @@ columns selected at export time.
 1. **`circuit-json`**: experiment union, source excitation additions, sweep,
    measurement, result, point, and error schemas plus fixtures.
 2. **`@tscircuit/props`**: discriminated props, source AC props, intrinsic
-   element props, engine capabilities, and structured engine method.
+   analysis props, namespaced child schemas, engine capabilities, and the
+   structured engine method.
 3. **`circuit-json-to-spice`**: four analysis statements and structured output/
    sweep bindings.
 4. **`@tscircuit/eecircuit-engine`**: explicit analysis/scale metadata,
@@ -925,10 +948,12 @@ columns selected at export time.
 5. **`@tscircuit/ngspice-spice-engine`**: generic real/complex conversion and
    serialized engine access.
 6. **`@tscircuit/core`**: per-experiment execution, target resolution,
-   measurement runner, sequential outer sweep, progress, and partial failures.
+   namespaced simulation children, measurement runner, sequential outer sweep,
+   progress, and partial failures.
 7. **Viewers/runframe/CLI**: generic charting, terminal-state detection,
    progress, and export.
-8. **Aggregate package and docs**: compatible version set and examples.
+8. **Aggregate package and docs**: lowercase `analogsimulation` namespace
+   export, compatible version set, and examples.
 
 Each package must publish contract fixtures so independently released versions
 can be checked in a compatibility matrix.
