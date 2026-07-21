@@ -9,20 +9,22 @@ functional sections can be read in isolation. A separate interconnect sheet may
 also show only the pins connecting two physical chips.
 
 The chip remains one source component, PCB component, footprint, and BOM entry.
-Only its schematic representation is split into views. This RFC initially
-applies to `<chip>`.
+Only its schematic representation is split. This RFC initially applies to
+`<chip>`.
 
 ## Design goals
 
-- Physical `<chip>` declarations do not receive schematic-view props.
-- A view is declared inside the `<schematicsheet>` that owns it.
-- A view references an existing physical component and selects existing pins.
-- View names can be used by traces and component `connections`.
-- The API does not require repeating the chip's `pinLabels`.
+- Physical `<chip>` declarations do not receive schematic-representation props.
+- A schematic reference is a direct child of the `<schematicsheet>` that owns
+  it.
+- A reference selects existing pins from one physical component.
+- Reference names can be used by traces and component `connections`.
+- The API avoids extra wrapper elements and does not repeat the chip's
+  `pinLabels`.
 
-## Shared physical circuit
+## Physical components
 
-All five API alternatives below represent the same two physical chips:
+The physical components remain regular chip declarations:
 
 ```tsx
 const mcuPinLabels = {
@@ -61,21 +63,22 @@ const PhysicalChips = () => (
 )
 ```
 
-Each example places U1's control pins on an MCU sheet, U2's control pins on a
-Flash sheet, and both chips' bus pins on an SPI Interconnect sheet.
+## TSX API
 
-## API 1: `<schematicview>` (recommended)
+`<schematiccomponentref>` is a schematic-only reference to an existing physical
+component. It is a direct child of a sheet, so the hierarchy and selector scope
+remain flat.
 
-`view` accurately describes a non-physical projection and remains applicable
-to component types other than chips.
+This example places U1's control pins on an MCU sheet, U2's control pins on a
+Flash sheet, and both chips' bus pins on an SPI Interconnect sheet:
 
 ```tsx
-export const SchematicViewApi = () => (
+export default () => (
   <board>
     <PhysicalChips />
 
     <schematicsheet name="MCU" displayName="MCU">
-      <schematicview
+      <schematiccomponentref
         name="U1A"
         componentRef=".U1"
         pins={["VDD", "GND", "RESET"]}
@@ -92,7 +95,7 @@ export const SchematicViewApi = () => (
     </schematicsheet>
 
     <schematicsheet name="Flash" displayName="Flash">
-      <schematicview
+      <schematiccomponentref
         name="U2A"
         componentRef=".U2"
         pins={["VCC", "GND", "HOLD"]}
@@ -100,12 +103,12 @@ export const SchematicViewApi = () => (
     </schematicsheet>
 
     <schematicsheet name="SPI" displayName="SPI Interconnect">
-      <schematicview
+      <schematiccomponentref
         name="U1B"
         componentRef=".U1"
         pins={["SCLK", "MOSI", "MISO", "FLASH_CS"]}
       />
-      <schematicview
+      <schematiccomponentref
         name="U2B"
         componentRef=".U2"
         pins={["CLK", "DI", "DO", "CS"]}
@@ -119,197 +122,24 @@ export const SchematicViewApi = () => (
 )
 ```
 
-Recommended props:
+### Props
 
 | Prop | Type | Meaning |
 | --- | --- | --- |
 | `name` | `string` | Unique schematic selector, such as `U1A`. |
 | `componentRef` | `string` | Selector for the physical component, such as `.U1`. |
-| `pins` | `readonly string[]` | Pin numbers or labels from the referenced component to show in this view. |
-| `schPinArrangement` | `SchematicPortArrangement` | Optional arrangement for this view's selected pins. |
+| `pins` | `readonly string[]` | Pin numbers or labels from the referenced component to show. |
+| `schPinArrangement` | `SchematicPortArrangement` | Optional arrangement for the selected pins. |
 
 `pins` replaces the proposed combination of `pinLabels` and `exposedPins`.
-Labels already come from the referenced chip; the view only selects which pins
-to display.
-
-## API 2: `<componentview>`
-
-This is equally generic, but relies on its `<schematicsheet>` parent to explain
-which kind of view it is.
-
-```tsx
-export const ComponentViewApi = () => (
-  <board>
-    <PhysicalChips />
-    <schematicsheet name="MCU" displayName="MCU">
-      <componentview
-        name="U1A"
-        componentRef=".U1"
-        pins={["VDD", "GND", "RESET"]}
-      />
-    </schematicsheet>
-    <schematicsheet name="Flash" displayName="Flash">
-      <componentview
-        name="U2A"
-        componentRef=".U2"
-        pins={["VCC", "GND", "HOLD"]}
-      />
-    </schematicsheet>
-    <schematicsheet name="SPI" displayName="SPI Interconnect">
-      <componentview
-        name="U1B"
-        componentRef=".U1"
-        pins={["SCLK", "MOSI", "MISO", "FLASH_CS"]}
-      />
-      <componentview
-        name="U2B"
-        componentRef=".U2"
-        pins={["CLK", "DI", "DO", "CS"]}
-      />
-      <trace from="U1B.SCLK" to="U2B.CLK" />
-      <trace from="U1B.MOSI" to="U2B.DI" />
-      <trace from="U1B.MISO" to="U2B.DO" />
-      <trace from="U1B.FLASH_CS" to="U2B.CS" />
-    </schematicsheet>
-  </board>
-)
-```
-
-## API 3: `<schematicrepresentation>`
-
-This most closely matches the domain language, but is verbose in larger
-circuits.
-
-```tsx
-export const SchematicRepresentationApi = () => (
-  <board>
-    <PhysicalChips />
-    <schematicsheet name="MCU" displayName="MCU">
-      <schematicrepresentation
-        name="U1A"
-        componentRef=".U1"
-        pins={["VDD", "GND", "RESET"]}
-      />
-    </schematicsheet>
-    <schematicsheet name="Flash" displayName="Flash">
-      <schematicrepresentation
-        name="U2A"
-        componentRef=".U2"
-        pins={["VCC", "GND", "HOLD"]}
-      />
-    </schematicsheet>
-    <schematicsheet name="SPI" displayName="SPI Interconnect">
-      <schematicrepresentation
-        name="U1B"
-        componentRef=".U1"
-        pins={["SCLK", "MOSI", "MISO", "FLASH_CS"]}
-      />
-      <schematicrepresentation
-        name="U2B"
-        componentRef=".U2"
-        pins={["CLK", "DI", "DO", "CS"]}
-      />
-      <trace from="U1B.SCLK" to="U2B.CLK" />
-      <trace from="U1B.MOSI" to="U2B.DI" />
-      <trace from="U1B.MISO" to="U2B.DO" />
-      <trace from="U1B.FLASH_CS" to="U2B.CS" />
-    </schematicsheet>
-  </board>
-)
-```
-
-## API 4: `<schematiccomponentref>`
-
-This is a generic version of `<schematicchipreference>`. It makes the reference
-behavior explicit, but describes the implementation more than the author's
-intent.
-
-```tsx
-export const SchematicComponentRefApi = () => (
-  <board>
-    <PhysicalChips />
-    <schematicsheet name="MCU" displayName="MCU">
-      <schematiccomponentref
-        name="U1A"
-        componentRef=".U1"
-        pins={["VDD", "GND", "RESET"]}
-      />
-    </schematicsheet>
-    <schematicsheet name="Flash" displayName="Flash">
-      <schematiccomponentref
-        name="U2A"
-        componentRef=".U2"
-        pins={["VCC", "GND", "HOLD"]}
-      />
-    </schematicsheet>
-    <schematicsheet name="SPI" displayName="SPI Interconnect">
-      <schematiccomponentref
-        name="U1B"
-        componentRef=".U1"
-        pins={["SCLK", "MOSI", "MISO", "FLASH_CS"]}
-      />
-      <schematiccomponentref
-        name="U2B"
-        componentRef=".U2"
-        pins={["CLK", "DI", "DO", "CS"]}
-      />
-      <trace from="U1B.SCLK" to="U2B.CLK" />
-      <trace from="U1B.MOSI" to="U2B.DI" />
-      <trace from="U1B.MISO" to="U2B.DO" />
-      <trace from="U1B.FLASH_CS" to="U2B.CS" />
-    </schematicsheet>
-  </board>
-)
-```
-
-## API 5: `<chipschematic>`
-
-This is concise and chip-specific, but cannot naturally extend to connectors,
-modules, or other component types.
-
-```tsx
-export const ChipSchematicApi = () => (
-  <board>
-    <PhysicalChips />
-    <schematicsheet name="MCU" displayName="MCU">
-      <chipschematic
-        name="U1A"
-        chipRef=".U1"
-        pins={["VDD", "GND", "RESET"]}
-      />
-    </schematicsheet>
-    <schematicsheet name="Flash" displayName="Flash">
-      <chipschematic
-        name="U2A"
-        chipRef=".U2"
-        pins={["VCC", "GND", "HOLD"]}
-      />
-    </schematicsheet>
-    <schematicsheet name="SPI" displayName="SPI Interconnect">
-      <chipschematic
-        name="U1B"
-        chipRef=".U1"
-        pins={["SCLK", "MOSI", "MISO", "FLASH_CS"]}
-      />
-      <chipschematic
-        name="U2B"
-        chipRef=".U2"
-        pins={["CLK", "DI", "DO", "CS"]}
-      />
-      <trace from="U1B.SCLK" to="U2B.CLK" />
-      <trace from="U1B.MOSI" to="U2B.DI" />
-      <trace from="U1B.MISO" to="U2B.DO" />
-      <trace from="U1B.FLASH_CS" to="U2B.CS" />
-    </schematicsheet>
-  </board>
-)
-```
+Labels already come from the referenced component; the reference only selects
+which pins to display.
 
 ## Circuit JSON
 
-No new Circuit JSON element is required. Every schematic view emits a
-`schematic_component` with the referenced physical component's
-`source_component_id` and the containing sheet's `schematic_sheet_id`:
+No new Circuit JSON element is required. Every `<schematiccomponentref>` emits
+a `schematic_component` with the physical component's `source_component_id` and
+the containing sheet's `schematic_sheet_id`:
 
 ```json
 [
@@ -402,17 +232,38 @@ No new Circuit JSON element is required. Every schematic view emits a
 ]
 ```
 
-Each view emits `schematic_port` records only for its selected `pins`. Those
-records retain the original `source_port_id`. Traces connected through view
-selectors therefore connect the original physical component ports.
+Each reference emits `schematic_port` records only for its selected `pins`.
+Those records retain the original `source_port_id`. Traces connected through
+reference selectors therefore connect the original physical component ports.
 
 ## Behavior and validation
 
-- If at least one view references a chip, its default single schematic symbol
+- If at least one reference targets a chip, its default single schematic symbol
   is suppressed.
-- View names must not collide with another component or view selector in their
-  subcircuit.
+- Reference names must not collide with another component or reference selector
+  in their subcircuit.
 - `componentRef` must resolve to one physical component.
-- `pins` must exist on the referenced component and may appear in only one view.
+- `pins` must exist on the referenced component and may appear in only one
+  reference.
 - Components nested directly in a sheet inherit that sheet.
-- Without any views, chips retain their existing single-symbol behavior.
+- Without any references, chips retain their existing single-symbol behavior.
+
+## Rejected alternatives
+
+- `<schematicchipreference>` is overly long and chip-specific. The proposed
+  element should be usable for other physical component types.
+- `<schematicview>` and `<componentview>` emphasize presentation but do not make
+  it clear that the element references an existing physical component.
+- `<componentrepresentation>` is verbose and also does not communicate the
+  reference relationship.
+- `<componentref>` is too generic outside the immediate sheet context;
+  `<schematiccomponentref>` remains explicit when selected or discussed alone.
+- `<chipview>` and `<chipsymbol>` are chip-specific. `symbol` can also be
+  confused with the graphic asset or the existing `symbol` prop.
+- `<schematicunit>` does not explain what a "unit" represents. The earlier
+  `<schematicunits><schematicunit /></schematicunits>` design also added an
+  unnecessary wrapper beneath `<chip>`. That deeper child hierarchy would
+  complicate selector scope and make direct selectors such as `U1A.RESET`
+  ambiguous or dependent on parent paths. Keeping `<schematiccomponentref>` as
+  a direct child of `<schematicsheet>` keeps selectors flat and avoids nesting
+  children unless it carries necessary ownership semantics.
