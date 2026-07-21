@@ -32,12 +32,12 @@ export default () => (
       dcSweepSource=".Vin"
       dcSweepStart="2.5V"
       dcSweepStop="5.5V"
-      dcSweepStep="0.1V"
+      sweepStep="0.1V"
     />
 
     <analog.acsweepsimulation
       name="frequency-response"
-      acSweepType="decade"
+      sweepType="decade"
       acSamplesPerInterval={20}
       acStartFrequency="10Hz"
       acStopFrequency="1MHz"
@@ -98,7 +98,7 @@ in a single analysis:
   dcSweepSource=".Vin"
   dcSweepStart="2.5V"
   dcSweepStop="5.5V"
-  dcSweepStep="0.1V"
+  sweepStep="0.1V"
 />
 ```
 
@@ -125,7 +125,7 @@ The source declares its small-signal magnitude and phase, while
 <analog.acsweepsimulation
   name="frequency-response"
   spiceEngine="ngspice"
-  acSweepType="decade"
+  sweepType="decade"
   acSamplesPerInterval={20}
   acStartFrequency="10Hz"
   acStopFrequency="1MHz"
@@ -134,7 +134,7 @@ The source declares its small-signal magnitude and phase, while
 
 | Prop | Type | Usage |
 | --- | --- | --- |
-| `acSweepType` | `"linear" \| "decade" \| "octave"` | Frequency spacing |
+| `sweepType` | `"linear" \| "decade" \| "octave"` | Frequency spacing |
 | `acStartFrequency` | `number \| string` | First frequency |
 | `acStopFrequency` | `number \| string` | Last frequency |
 | `acSamplesPerInterval` | `number` | Samples per decade or octave |
@@ -273,21 +273,24 @@ An AC voltage graph stores complex voltage samples against frequency:
   "simulation_experiment_id": "simulation_experiment_frequency_response",
   "simulation_voltage_probe_id": "simulation_voltage_probe_vout",
   "frequencies_hz": [10, 12.589, 15.849],
-  "real_voltage_levels": [0.99, 0.98, 0.96],
-  "imaginary_voltage_levels": [-0.01, -0.02, -0.04]
+  "complex_voltages": [
+    { "re": 0.99, "im": -0.01 },
+    { "re": 0.98, "im": -0.02 },
+    { "re": 0.96, "im": -0.04 }
+  ]
 }
 ```
 
-The current form uses `real_current_levels` and
-`imaginary_current_levels`. DC sweep graphs use `sweep_values`,
-`sweep_unit`, and either `voltage_levels` or `current_levels`. Parallel
-arrays always have the same length.
+The current form uses `complex_currents` with the same `{ "re", "im" }`
+shape. Each complex value corresponds by index to one entry in
+`frequencies_hz`. DC sweep graphs use `sweep_values`, `sweep_unit`, and either
+`voltage_levels` or `current_levels`.
 
 ### Parameter sweep relationships
 
 `<analog.sweepparameter>` emits a `simulation_parameter_sweep`. Its target ID
 is specific to `parameter_type`; this resistance example uses
-`resistor_component_id`:
+`resistor_source_component_id`:
 
 ```json
 {
@@ -296,7 +299,7 @@ is specific to `parameter_type`; this resistance example uses
   "simulation_experiment_id": "simulation_experiment_load_response",
   "name": "load-resistance",
   "parameter_type": "resistance",
-  "resistor_component_id": "source_component_rload",
+  "resistor_source_component_id": "source_component_rload",
   "parameter_values": [100, 330, 1000, 3300, 10000],
   "parameter_unit": "Ω"
 }
