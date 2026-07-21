@@ -46,9 +46,8 @@ export default () => (
 )
 ```
 
-All four elements accept `name`, `spiceEngine`, and `spiceOptions`. The element
-name supplies the analysis context, so analysis-specific props do not repeat
-`dc` or `ac` prefixes.
+All four elements accept `name`, `spiceEngine`, and `spiceOptions`. Their
+analysis-specific props are described below.
 
 ## Transient simulation
 
@@ -103,16 +102,9 @@ in a single analysis:
 />
 ```
 
-| Prop | Type | Usage |
-| --- | --- | --- |
-| `sweepSource` | `string` | Voltage- or current-source selector |
-| `sweepStart` | `number \| string` | First source value |
-| `sweepStop` | `number \| string` | Last source value |
-| `sweepStep` | `number \| string` | Nonzero source-value increment |
-
-All four props are required. `sweepSource` must resolve to one independent
-voltage or current source. The start, stop, and step use volts for a voltage
-source and amperes for a current source. Unit-bearing strings are preferred.
+`sweepSource` must resolve to one voltage or current source. `sweepStart`,
+`sweepStop`, and the nonzero `sweepStep` use volts for a voltage source and
+amperes for a current source. Unit-bearing strings are preferred.
 
 This is a SPICE DC source sweep. It is different from the repeated component
 parameter sweep described below.
@@ -148,11 +140,9 @@ The source declares its small-signal magnitude and phase, while
 | `samplesPerInterval` | `number` | Samples per decade or octave |
 | `sampleCount` | `number` | Total samples for a linear sweep |
 
-`sweepType`, `startFrequency`, and `stopFrequency` are required. Raw frequency
-numbers use hertz, and both frequencies must be positive. Decade and octave
-sweeps require a positive `samplesPerInterval`; linear sweeps require a
-positive `sampleCount`. AC results retain real and imaginary values; magnitude
-and phase are views of those values.
+Raw frequency numbers use hertz. Decade and octave sweeps require
+`samplesPerInterval`. Linear sweeps require `sampleCount`. AC results retain
+real and imaginary values; magnitude and phase are views of those values.
 
 DC bias, transient waveform props, and `acMagnitude`/`acPhase` may coexist on
 the same source. They apply only to their corresponding analysis.
@@ -232,9 +222,7 @@ Each TSX simulation emits a `simulation_experiment`. The existing
 | `analog.dcsweepsimulation` | `spice_dc_sweep` |
 | `analog.acsweepsimulation` | `spice_ac_analysis` |
 
-Analysis props are stored directly on the experiment. Their names use the
-snake-case form of the TSX prop, with a unit suffix where the Circuit JSON
-field has a fixed unit. For example:
+Analysis props are stored directly on the experiment. For example:
 
 ```json
 {
@@ -242,10 +230,10 @@ field has a fixed unit. For example:
   "simulation_experiment_id": "simulation_experiment_frequency_response",
   "name": "frequency-response",
   "experiment_type": "spice_ac_analysis",
-  "sweep_type": "decade",
-  "samples_per_interval": 20,
-  "start_frequency_hz": 10,
-  "stop_frequency_hz": 1000000
+  "ac_sweep_type": "decade",
+  "ac_samples_per_interval": 20,
+  "ac_start_frequency_hz": 10,
+  "ac_stop_frequency_hz": 1000000
 }
 ```
 
@@ -294,25 +282,15 @@ An AC voltage graph stores complex voltage samples against frequency:
 ```
 
 The current form uses `complex_currents` with the same `{ "re", "im" }`
-shape. `complex_voltages` or `complex_currents` and `frequencies_hz` have the
-same length, with entries corresponding by index. DC sweep graphs use
-`sweep_values`, `sweep_unit`, and either `voltage_levels` or `current_levels`.
+shape. The frequency and complex-value arrays always have the same length. DC
+sweep graphs use `sweep_values`, `sweep_unit`, and either `voltage_levels` or
+`current_levels`.
 
 ### Parameter sweep relationships
 
 `<analog.sweepparameter>` emits a `simulation_parameter_sweep`. Its target ID
-is specific to `parameter_type`:
-
-| `parameter_type` | Circuit JSON target ID |
-| --- | --- |
-| `"resistance"` | `resistor_source_component_id` |
-| `"capacitance"` | `capacitor_source_component_id` |
-| `"inductance"` | `inductor_source_component_id` |
-| `"voltage"` | `source_net_id` |
-| `"current"` | `current_source_component_id` |
-
-Exactly one target ID is present. For example, the resistance sweep above
-emits:
+is specific to `parameter_type`; this resistance example uses
+`resistor_source_component_id`:
 
 ```json
 {
