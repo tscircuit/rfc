@@ -1,12 +1,15 @@
-# Multi-sheet Schematic Units
+# Multi-sheet Schematic Representations
 
 ## Motivation
 
-A physical component can have schematic symbols whose pins belong on different
-schematic sheets. tscircuit should keep one source/PCB component while rendering
-one schematic component per unit.
+A complex chip is one physical component, but showing every pin in one
+schematic symbol can make a design crowded and difficult to read. Authors should
+be able to split that chip's schematic representation across multiple sheets so
+functional sections, such as power and flash, can be read in isolation.
 
-This RFC initially applies to `<chip>`.
+The chip remains one source component, PCB component, footprint, and BOM entry.
+Only its schematic representation is split into units. This RFC initially
+applies to `<chip>`.
 
 ## TSX API
 
@@ -61,8 +64,8 @@ export default () => (
 
 | Element | Prop | Type | Meaning |
 | --- | --- | --- | --- |
-| `chip` | `schematicUnits` | `ReactElement<SchematicUnitsProps>` | Replaces the chip's single schematic representation. |
-| `schematicunits` | `children` | `ReactElement<SchematicUnitProps> \| ReactElement<SchematicUnitProps>[]` | Units belonging to the parent chip. |
+| `chip` | `schematicUnits` | `ReactElement<SchematicUnitsProps>` | Splits the chip's schematic representation into units. |
+| `schematicunits` | `children` | `ReactElement<SchematicUnitProps> \| ReactElement<SchematicUnitProps>[]` | Schematic views of the parent chip. |
 | `schematicunit` | `name` | `string` | Unique selector name, such as `U1A`. |
 | `schematicunit` | `schSheetName` | `string` | Name of the target `<schematicsheet>`. |
 | `schematicunit` | `pinLabels` | `PinLabelsProp` | Subset of the parent chip's `pinLabels`. |
@@ -79,9 +82,10 @@ inference requires an explicit value.
 
 ## Circuit JSON
 
-No `schematic_unit` Circuit JSON element is added. Each unit emits a
-`schematic_component` with the same `source_component_id` and its own
-`schematic_sheet_id`. The relevant records for the example are:
+No `schematic_unit` Circuit JSON element is added. Each unit emits a separate
+`schematic_component` view with the same `source_component_id` and its own
+`schematic_sheet_id`. Sharing the source ID preserves the fact that the views
+represent one physical chip. The relevant records for the example are:
 
 ```json
 [
