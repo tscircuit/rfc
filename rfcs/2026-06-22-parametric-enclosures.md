@@ -56,7 +56,7 @@ export default () => (
       <UsbC name="J1" pcbX="22mm" pcbY="0mm" />
     </board>
 
-    <enclosure.fdm.box boardRef=".B1" autoCutouts />
+    <enclosure.fdm.box boardRef=".B1" />
   </assembly.device>
 )
 ```
@@ -124,7 +124,6 @@ export default () => (
       name="EN1"
       boardRef=".B1"
       wallThickness="2mm"
-      autoCutouts
     />
   </assembly.device>
 )
@@ -148,8 +147,7 @@ implementation additionally exercises:
 | `standoffHeight` | Gap from floor top to PCB bottom. |
 | `topHeadroom` | Clearance above the tallest top-side component. |
 | `lidLipDepth` | Depth of the friction-fit lid lip. |
-| `anchor` | Mounting-stack key or inline mounting specification. |
-| `autoCutouts` | Place apertures explicitly declared by parts; never invent an opening from body bounds. |
+| `disableCutouts` | Disable placement of apertures explicitly declared by parts. Declared apertures are placed by default; openings are never invented from body bounds. |
 
 ### Manufacturing processes and design rules
 
@@ -256,6 +254,7 @@ footprint and CAD model.
     width="9.2mm"
     height="3.3mm"
     margin="0.2mm"
+    zExtentAboveBoard="1.65mm"
   />
 </connector>
 ```
@@ -268,15 +267,17 @@ The merged `@tscircuit/props` contract supports:
 | `rect` | `width`, `height` |
 | `circle` | `radius` |
 
-Every branch may carry `margin`. Numbers use the project default unit; explicit
-distance strings such as `"3.66mm"` and `"0.1in"` may be mixed.
+Every branch may carry `margin` and `zExtentAboveBoard`.
+`zExtentAboveBoard` is the aperture center height above the PCB top surface.
+Numbers use the project default unit; explicit distance strings such as
+`"3.66mm"` and `"0.1in"` may be mixed.
 
 A cutout is generated only when a part or enclosure author explicitly supplies
 an aperture. Components without one do not receive an inferred opening.
-`autoCutouts` means automatic placement of declared apertures, not automatic
-invention of aperture existence, shape, or size. Body and CAD bounds may help
-place or validate a requested feature; they never imply that a component needs
-an enclosure opening.
+Declared apertures are placed automatically unless `disableCutouts` is set.
+Automatic placement never invents aperture existence, shape, or size. Body and
+CAD bounds may help place or validate a requested feature; they never imply that
+a component needs an enclosure opening.
 
 ### Reusable defaults and caller replacement
 
@@ -311,32 +312,22 @@ This is ordinary React composition. The resulting structure remains
 XML-compatible: a part supplies one complete default child, and the caller may
 supply another complete child without callback or render-function props.
 
-### Aperture placement and interaction surfaces
+### Aperture placement
 
-The aperture profile defines opening geometry and clearance, but not by itself
-the three-dimensional interaction point that the opening serves. Placement
-requires a component interaction surface:
+The aperture profile supplies opening geometry and clearance. Its optional
+`zExtentAboveBoard` supplies the aperture center height above the PCB top
+surface.
 
-- a three-dimensional center in the component-local mounting frame;
-- an outward direction; and
-- a role such as mating, actuation, viewing, or optical output.
+Board-plane placement remains inferred from the owning component:
 
-The exact TSX spelling remains experimental. It should stay XML-compatible and
-conceptually support a structure such as:
+- transformed insertion direction selects the mating face when available;
+- cable insertion inference supplies x/y and mating-side evidence; and
+- component/CAD bounds validate that the selected face is reachable.
 
-```tsx
-<enclosure.interface role="mating" z="1.65mm">
-  <enclosure.cutoutaperture
-    shape="pill"
-    width="9.2mm"
-    height="3.3mm"
-  />
-</enclosure.interface>
-```
-
-This is illustrative, not a committed element name. Named attributes or nested
-position elements are preferable to an opaque JavaScript object when both can
-express the same information.
+When `zExtentAboveBoard` is omitted, the current compatibility fallback places
+the opening using its vertical aperture extent. A CAD/body-based fallback may
+replace or supplement that behavior after it is proven against representative
+parts.
 
 ### Connector placement: current implementation
 
@@ -351,34 +342,32 @@ For a side-entry connector:
 2. transformed `insertionDirection` selects the mating face when available;
 3. cable-point inference supplies board-plane x/y and otherwise helps select the
    nearest reachable wall;
-4. the current fallback centers side openings on the relevant CAD/body height;
+4. `zExtentAboveBoard` supplies the opening height when authored;
 5. the aperture profile supplies shape, size, and margin; and
 6. body/CAD geometry helps validate wall reach and unresolved placement, but
    never synthesizes an aperture.
 
-The public aperture element is not extended with placement props. CAD/body
-centering is only the current fallback because a connector opening need not be
-centered in its housing. Authored placement belongs in the separate interaction
-surface vocabulary.
+When `zExtentAboveBoard` is absent, compatibility placement currently uses the
+aperture's vertical extent. This fallback is intentionally weaker than
+part-authored placement because a connector opening need not be centered in its
+housing.
 
 ### Non-connector placement: planned design
 
-Other part families should feed the same interaction-surface resolver through
-specialized inference strategies. For each center coordinate and direction,
-resolution follows:
+Other part families should feed the same aperture resolver through specialized
+inference strategies. For each center coordinate and direction, resolution
+follows:
 
 1. explicit caller value;
-2. part-authored interaction metadata;
+2. part-authored `zExtentAboveBoard` and direction metadata;
 3. role/part-family inference; then
 4. the center of the relevant CAD/body face as a placement fallback.
 
-This precedence applies only after an aperture or interaction is explicitly
-declared.
+This precedence applies only after an aperture is explicitly declared.
 
-The resolved interaction ray selects and intersects an enclosure face. The two
+The resolved mating ray selects and intersects an enclosure face. The two
 coordinates tangent to that face center the aperture. Retention and support
-features may reference the same interaction and body but remain separate from
-the aperture profile.
+features remain separate from the aperture profile.
 
 | Part/interface | Planned centering and enclosure behavior |
 | --- | --- |
@@ -647,18 +636,16 @@ Add the React-independent `assemblyProps.device` contract to
 
 ### 2. Consolidate connector aperture placement
 
-Migrate connector behavior into the explicit interaction-surface model:
+Migrate connector behavior into the explicit aperture-placement model:
 
 - require `enclosure.cutoutaperture`;
 - preserve transformed insertion-direction precedence;
 - use cable-point inference only for board-plane x/y and mating-side evidence;
-- source z from the part's interaction metadata;
+- source z from `enclosure.cutoutaperture.zExtentAboveBoard` when provided;
 - validate enclosure-face reach using component/CAD bounds; and
 - report unresolved placement rather than creating a fallback opening.
 
 Keep `enclosure.cutoutaperture` exactly aligned with its upstream props schema.
-Define the XML-compatible interaction vocabulary separately before exposing
-authored interaction-position overrides.
 
 ### 3. Migrate the reference implementation
 
