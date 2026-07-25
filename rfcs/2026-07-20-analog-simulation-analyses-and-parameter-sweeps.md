@@ -407,23 +407,25 @@ Circuit JSON keeps result types specific to their semantics:
 | Harmonic-balance voltage | `simulation_harmonic_voltage_spectrum` |
 | Harmonic-balance current | `simulation_harmonic_current_spectrum` |
 | Scalar measurement | `simulation_measurement_result` |
-| One-dimensional measurement sweep | `simulation_measurement_sweep_graph` |
-| Two-dimensional measurement sweep | `simulation_measurement_surface` |
-| Boundary across a sweep | `simulation_sweep_boundary_graph` |
 | Spectrum | `simulation_voltage_spectrum`, `simulation_current_spectrum`, or `simulation_digital_spectrum` |
 | Histogram | `simulation_measurement_histogram` or `simulation_digital_histogram` |
 | Eye diagram | `simulation_eye_diagram` |
-| Monte Carlo sample | `simulation_monte_carlo_sample` |
 
-`simulation_measurement_result` stores one value with its quantity and unit.
-Raw transient, AC, noise, S-parameter, and harmonic results are never replaced
-by a generic graph. Measurement sweep graphs only contain scalar measurement
-values against parameter coordinates. Higher sweep dimensions become separate
-series or surfaces at fixed coordinate combinations.
+`simulation_measurement_result` stores one value with its quantity, unit, and
+ordered sweep coordinates. Repeating this element at different coordinates
+represents scalar curves, surfaces, higher-dimensional sweeps, and boundaries
+without adding presentation-specific Circuit JSON types. Renderers decide
+whether to show those values as a line, family of curves, surface, or table.
 
-Every result references its experiment, exact model assets, deterministic
-sweep coordinates, and optional Monte Carlo sample. Partial or unsupported
-model behavior emits a `simulation_model_limitation_warning`.
+Raw transient, AC, noise, S-parameter, and harmonic results remain
+analysis-specific because their axes, values, units, and probe references are
+different.
+
+`simulation_monte_carlo_sample` is experiment context, not a result. It records
+the sample index, seed, and realized parameter values once. Every result
+references its experiment, exact model assets, deterministic sweep
+coordinates, and optional Monte Carlo sample. Partial or unsupported model
+behavior emits a `simulation_model_limitation_warning`.
 
 ## Compatibility
 
@@ -446,8 +448,8 @@ This RFC specifies:
 - DC, transient, AC, noise, S-parameter, and harmonic analyses;
 - nested deterministic and Monte Carlo parameter variation;
 - composable scalar measurements and boundary extraction; and
-- Circuit JSON for raw results, scalar curves, surfaces, spectra, histograms,
-  and eye diagrams.
+- Circuit JSON for raw results, coordinate-indexed measurements, spectra,
+  histograms, and eye diagrams.
 
 Engine interfaces, execution scheduling, rendering behavior, export formats,
 and package implementation order are intentionally outside this RFC.
