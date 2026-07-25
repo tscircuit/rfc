@@ -1,447 +1,429 @@
-# Analog Simulation Analyses, Parameter Sweeps, and Scalar Measurements
+# Simulation Experiments and Datasheet Measurements
 
 ## Motivation
 
-tscircuit currently exposes transient simulation through
-`<analogsimulation />`. Circuit authors also need DC operating point, direct
-DC sweep, AC sweep, and repeated simulations across component values.
+Datasheet plots are not limited to raw transient waveforms. They include
+operating curves, efficiency, stability, noise, distortion, limits,
+distributions, spectra, and eye diagrams across voltage, load, temperature,
+frequency, and process variation.
 
-This RFC defines how those simulations are written in TSX and the Circuit JSON
-they produce. Compiler, engine, scheduling, rendering, and export APIs are
-outside its scope.
+This RFC defines the TSX and Circuit JSON needed to describe those experiments.
+The same experiment must work with a vendor model or a model authored from
+documented behavior. Compiler, engine, scheduling, rendering, and export APIs
+are outside its scope.
 
-## Usage at a glance
+## Use cases
+
+The API is designed around these recurring datasheet use cases:
+
+| Use case | Examples | Contract |
+| --- | --- | --- |
+| Static curves | regulation, output swing, quiescent current, INL and DNL | DC/parameter sweeps and measurements |
+| Time domain | switching, startup, line/load steps, settling | Arbitrary sources, transient analysis, edge metrics |
+| Frequency domain | gain/phase, PSRR, impedance, noise, phase noise | AC, noise, S-parameter, and harmonic analyses |
+| Power and distortion | efficiency, THD+N, SNR, SINAD, ENOB, SFDR, IMD | Expressions and spectra |
+| Boundaries | current capability, mode transitions, safe limits | Nested sweeps and boundary extraction |
+| Variation | temperature, tolerance, process corners, yield | Model parameters, Monte Carlo, histograms |
+| Signal integrity | PRBS response, jitter, eye opening, mask compliance | PRBS sources and eye diagrams |
+| Missing vendor model | documented or measured behavior | Versioned model assets and explicit assumptions |
+
+Representative TI examples include
+[TPS63802](https://www.ti.com/lit/ds/symlink/tps63802.pdf) Figures 10-2 through
+10-31, [OPA191](https://www.ti.com/lit/ds/symlink/opa191.pdf) Figures 6-14
+through 6-47, [ADC3561](https://www.ti.com/lit/gpn/adc3561) Figures 6-1 through
+6-13, and
+[HD3SS3212-Q1](https://www.ti.com/lit/ds/symlink/hd3ss3212-q1.pdf) Figures 9
+through 12.
+
+## Analyses
 
 The `analog` namespace gives each analysis its own element:
 
-```tsx
-import { analog } from "tscircuit"
+| TSX element | Use |
+| --- | --- |
+| `analog.dcoperatingpointsimulation` | One DC value per probe |
+| `analog.dcsweepsimulation` | Direct sweep of one independent source |
+| `analog.transientsimulation` | Voltage, current, and digital values over time |
+| `analog.acsweepsimulation` | Complex small-signal response |
+| `analog.noisesimulation` | Input- and output-referred noise density |
+| `analog.sparametersimulation` | Complex multiport S-parameters |
+| `analog.harmonicbalancesimulation` | Periodic steady state and mixing products |
 
-export default () => (
-  <board>
-    <analog.transientsimulation
-      name="startup"
-      duration="10ms"
-      timePerStep="1us"
-    />
+All analysis elements accept `name` and `simulationEngine`. `spiceEngine`
+remains the compatibility spelling for SPICE-backed analyses.
 
-    <analog.dcoperatingpointsimulation name="bias-point" />
+The existing transient, DC operating-point, direct DC sweep, and AC sweep props
+remain unchanged. Raw time numbers use milliseconds and raw frequency numbers
+use hertz. Decade and octave sweeps use `samplesPerInterval`; linear sweeps use
+`sampleCount`.
 
-    <analog.dcsweepsimulation
-      name="line-regulation"
-      sweepSource=".Vin"
-      sweepStart="2.5V"
-      sweepStop="5.5V"
-      sweepStep="0.1V"
-    />
-
-    <analog.acsweepsimulation
-      name="frequency-response"
-      sweepType="decade"
-      samplesPerInterval={20}
-      startFrequency="10Hz"
-      stopFrequency="1MHz"
-    />
-  </board>
-)
-```
-
-All four elements accept `name`, `spiceEngine`, and `spiceOptions`. Their
-analysis-specific props are described below.
-
-## Transient simulation
-
-`<analog.transientsimulation>` records voltage and current over time:
+A noise analysis names the measured output and optional input source:
 
 ```tsx
-<analog.transientsimulation
-  name="startup"
-  duration="10ms"
-  startTime="0ms"
-  timePerStep="1us"
-  spiceEngine="ngspice"
+<analog.noisesimulation
+  name="input-noise"
+  outputVoltageProbeRef=".VOUT"
+  inputSourceRef=".VIN"
+  sweepType="decade"
+  samplesPerInterval={20}
+  startFrequency="0.1Hz"
+  stopFrequency="10MHz"
 />
 ```
 
-| Prop | Type | Default |
-| --- | --- | --- |
-| `duration` | `number \| string` | `"10ms"` |
-| `startTime` | `number \| string` | `"0ms"` |
-| `timePerStep` | `number \| string` | `"0.01ms"` |
+An S-parameter analysis uses the AC sweep props. Its `<analog.port>` children
+declare `positiveNet`, `negativeNet`, and `referenceImpedance`.
 
-Raw numbers use milliseconds. `duration` and `timePerStep` must be positive,
-and `startTime` must be between zero and `duration`.
+`<analog.harmonicbalancesimulation>` accepts `fundamentals` and
+`harmonicCount`. Multiple fundamentals cover mixers and intermodulation.
 
-## DC operating point
+## Stimulus waveforms
 
-`<analog.dcoperatingpointsimulation>` records one voltage or current value for
-each probe:
+Voltage and current sources have matching pulse timing props:
+`pulseDelay`, `riseTime`, `fallTime`, `pulseWidth`, and `period`.
+
+Piecewise-linear points describe arbitrary ramps, steps, sequences, and
+measured stimuli:
 
 ```tsx
-<analog.dcoperatingpointsimulation
-  name="bias-point"
-  spiceEngine="ngspice"
+<currentsource
+  name="ILOAD"
+  currentWaveform={[
+    { time: "0ms", current: "100mA" },
+    { time: "1ms", current: "100mA" },
+    { time: "1.01ms", current: "1A" },
+    { time: "2ms", current: "1A" },
+    { time: "2.01ms", current: "100mA" },
+  ]}
+  repeatPeriod="3ms"
 />
 ```
 
-It has no analysis-specific props.
+Voltage sources use `voltageWaveform` with `{ time, voltage }` points. Points
+are applied in order and linearly interpolated. A repeated waveform must end no
+later than `repeatPeriod`.
 
-## Direct DC source sweep
-
-`<analog.dcsweepsimulation>` sweeps one independent voltage or current source
-in a single analysis:
-
-```tsx
-<analog.dcsweepsimulation
-  name="line-regulation"
-  spiceEngine="ngspice"
-  sweepSource=".Vin"
-  sweepStart="2.5V"
-  sweepStop="5.5V"
-  sweepStep="0.1V"
-/>
-```
-
-`sweepSource` must resolve to one voltage or current source. `sweepStart`,
-`sweepStop`, and the nonzero `sweepStep` use volts for a voltage source and
-amperes for a current source. Unit-bearing strings are preferred.
-
-This is a SPICE DC source sweep. It is different from the repeated component
-parameter sweep described below.
-
-## AC sweep
-
-The source declares its small-signal magnitude and phase, while
-`<analog.acsweepsimulation>` declares the frequency sweep:
+PRBS stimulus avoids expanding millions of piecewise-linear points:
 
 ```tsx
 <voltagesource
-  name="Vin"
-  voltage="2.5V"
-  acMagnitude="1V"
-  acPhase="0deg"
-/>
-
-<analog.acsweepsimulation
-  name="frequency-response"
-  spiceEngine="ngspice"
-  sweepType="decade"
-  samplesPerInterval={20}
-  startFrequency="10Hz"
-  stopFrequency="1MHz"
+  name="DATA"
+  waveShape="prbs"
+  pattern="prbs31"
+  bitRate="10Gbps"
+  lowVoltage="-400mV"
+  highVoltage="400mV"
+  riseTime="35ps"
+  fallTime="35ps"
+  randomSeed={7}
 />
 ```
 
-| Prop | Type | Usage |
-| --- | --- | --- |
-| `sweepType` | `"linear" \| "decade" \| "octave"` | Frequency spacing |
-| `startFrequency` | `number \| string` | First frequency |
-| `stopFrequency` | `number \| string` | Last frequency |
-| `samplesPerInterval` | `number` | Samples per decade or octave |
-| `sampleCount` | `number` | Total samples for a linear sweep |
+PRBS sources may add bounded random and deterministic jitter. A fixed
+`randomSeed` makes the generated waveform reproducible.
 
-Raw frequency numbers use hertz. Decade and octave sweeps require
-`samplesPerInterval`. Linear sweeps require `sampleCount`. AC results retain
-real and imaginary values; magnitude and phase are views of those values.
+Voltage and current sources may also add seeded white, flicker, or bounded
+noise. `<analog.modelparameterwaveform>` applies piecewise-linear or stepped
+values to a model parameter such as temperature, light, pressure, or magnetic
+field.
 
-DC bias, transient waveform props, and `acMagnitude`/`acPhase` may coexist on
-the same source. They apply only to their corresponding analysis.
+## Parameter variation
 
-## Component parameter sweeps
+`<analog.sweepparameter>` repeats its parent simulation. It keeps
+parameter-specific target props:
 
-A nested `<analog.sweepparameter>` repeats its parent simulation with a
-simulation-only component value. This example overlays a transient result for
-each load resistance:
+| `parameterType` | Required target |
+| --- | --- |
+| `"resistance"` | `resistorRef` |
+| `"capacitance"` | `capacitorRef` |
+| `"inductance"` | `inductorRef` |
+| `"voltage"` | `net` |
+| `"current"` | `currentSourceRef` |
+| `"temperature"` | No target |
 
-```tsx
-<resistor name="Rload" resistance="1kΩ" />
+`values` gives explicit coordinates. `start`, `stop`, and `step` generate a
+linear range. More than one sweep is allowed; the simulation runs the Cartesian
+product in child order.
 
-<analog.transientsimulation
-  name="load-response"
-  duration="10ms"
-  timePerStep="1us"
->
-  <analog.sweepparameter
-    name="load-resistance"
-    parameterType="resistance"
-    resistorRef=".Rload"
-    values={["100Ω", "330Ω", "1kΩ", "3.3kΩ", "10kΩ"]}
-  />
-</analog.transientsimulation>
-```
-
-`parameterType` selects a parameter-specific reference prop. It does not use a
-polymorphic `target`/`targetProperty` pair.
-
-| `parameterType` | Required target prop | Example |
-| --- | --- | --- |
-| `"resistance"` | `resistorRef` | `resistorRef=".Rload"` |
-| `"capacitance"` | `capacitorRef` | `capacitorRef=".C1"` |
-| `"inductance"` | `inductorRef` | `inductorRef=".L1"` |
-| `"voltage"` | `net` | `net="VBIAS"` |
-| `"current"` | `currentSourceRef` | `currentSourceRef=".Iload"` |
-
-For example, a DC operating-point sweep of a forced net voltage is:
-
-```tsx
-<analog.dcoperatingpointsimulation name="bias-sweep">
-  <analog.sweepparameter
-    parameterType="voltage"
-    net="VBIAS"
-    values={["0V", "0.5V", "1V", "1.5V", "2V"]}
-  />
-</analog.dcoperatingpointsimulation>
-```
-
-`values` preserves the requested order. A generated linear sweep may instead
-use `start`, `stop`, and `step`:
-
-```tsx
-<analog.sweepparameter
-  parameterType="resistance"
-  resistorRef=".Rload"
-  start="100Ω"
-  stop="1kΩ"
-  step="100Ω"
-/>
-```
-
-Exactly one sweep parameter is allowed per simulation in this RFC. Each value
-produces the same result type as the parent simulation, linked to its sweep
-point. Multidimensional sweeps are a separate proposal.
-
-## Scalar measurements
-
-Measurements reduce a transient probe graph to one scalar. When the simulation
-has a parameter sweep, the measurement runs once for every sweep point.
-
-`<analog.measurevoltage>` and `<analog.measurecurrent>` select a probe and a
-calculation:
+This experiment finds output-current capability versus input voltage:
 
 ```tsx
 <analog.transientsimulation
-  name="load-regulation"
+  name="output-current-capability"
   duration="5ms"
   timePerStep="1us"
 >
   <analog.sweepparameter
+    name="input-voltage"
+    parameterType="voltage"
+    net="VIN"
+    values={["1.8V", "2.5V", "3.3V", "4.2V", "5.5V"]}
+  />
+  <analog.sweepparameter
     name="load-current"
     parameterType="current"
     currentSourceRef=".ILOAD"
-    values={["10mA", "100mA", "500mA", "1A", "2A"]}
+    start="0A"
+    stop="3A"
+    step="25mA"
   />
-  <analog.measurevoltage
+  <analog.measure
     name="settled-output"
-    voltageProbeRef=".VOUT"
-    calculation="mean"
-    startTime="4ms"
-    endTime="5ms"
+    expression='mean(V(".VOUT"), from=4ms, to=5ms)'
+    outputUnit="V"
+  />
+  <analog.findboundary
+    name="maximum-load"
+    sweepRef=".load-current"
+    where='M(".settled-output") >= 3.234V'
+    choose="maximum"
   />
 </analog.transientsimulation>
 ```
 
-`<analog.measurecurrent>` uses `currentProbeRef`. Both elements support:
+`<analog.sweepsourceparameter>` varies `amplitude`, `frequency`, `phase`,
+`dutyCycle`, pulse timing, PRBS bit rate, or jitter on one voltage or current
+source. `<analog.sweepmodelparameter>` varies a parameter declared by a
+component model. The source form requires `voltageSourceRef` or
+`currentSourceRef`; the model form requires `componentRef`. Both accept
+`parameter`, `unit`, and the same coordinate props. This covers source
+conditions, gain settings, process corners, environmental quantities, and
+device-specific parameters without a polymorphic target.
 
-| `calculation` | Result |
-| --- | --- |
-| `"mean"` | Time-weighted mean |
-| `"minimum"` | Minimum sample |
-| `"maximum"` | Maximum sample |
-| `"peak-to-peak"` | Maximum minus minimum |
-| `"rms"` | Time-weighted root mean square |
-| `"final"` | Last sample |
+`<analog.montecarlo>` accepts `sampleCount` and `randomSeed`. Its
+`<analog.varyresistance>`, `<analog.varycapacitance>`, and
+`<analog.varymodelparameter>` children declare uniform, normal, or explicit
+distributions. Monte Carlo samples may be nested inside deterministic sweeps.
 
-`startTime` and `endTime` are optional, but must be supplied together. They
-default to the full recorded interval. Raw numbers use milliseconds.
+## Measurements
 
-`<analog.measurevoltageregulation>` returns the percentage difference between
-the mean measured voltage and `nominalVoltage`:
+`<analog.measure>` produces one unit-checked scalar from raw results:
 
 ```tsx
-<analog.measurevoltageregulation
+<analog.measure
   name="output-regulation"
-  voltageProbeRef=".VOUT"
-  nominalVoltage="3.3V"
-  startTime="4ms"
-  endTime="5ms"
+  expression='100 * (mean(V(".VOUT"), from=4ms, to=5ms) - 3.3V) / 3.3V'
+  outputUnit="%"
+/>
+
+<analog.measure
+  name="efficiency"
+  expression='100 * abs(mean(V(".VOUT") * I(".IOUT"))) / abs(mean(V(".VIN") * I(".IIN")))'
+  outputUnit="%"
+/>
+
+<analog.measure
+  name="burst-frequency"
+  expression='frequency(V(".SW"), threshold=1.5V, edge="rising", holdoff=20us)'
+  outputUnit="Hz"
 />
 ```
 
-The result is
-`100 * (mean measured voltage - nominal voltage) / nominal voltage`.
+The expression language is not JavaScript. It contains:
 
-`<analog.measurevoltagefrequency>` measures the frequency of rising or falling
-threshold crossings:
+- `V(selector)`, `I(selector)`, and `D(selector)` for voltage, current, and
+  digital-bus samples;
+- `M(name)` for another scalar measurement;
+- unit-bearing literals, arithmetic, comparisons, conditionals, and
+  dimension-checked unit conversion;
+- windowing, interpolation, differentiation, integration, correlation, and
+  convolution;
+- scalar reducers such as mean, minimum, maximum, peak-to-peak, RMS, integral,
+  and final value;
+- edge metrics such as frequency, period, duty cycle, delay, rise/fall time,
+  settling time, overshoot, and undershoot; and
+- spectral metrics such as bandwidth, gain/phase margin, THD, THD+N, SNR,
+  SINAD, ENOB, SFDR, IMD, integrated noise, and jitter.
+
+Vector operations include FFT, inverse FFT, and histogram bins. Expressions
+must be deterministic and cannot access files, the network, or runtime state.
+
+`<analog.findboundary>` reduces one sweep dimension by selecting the minimum or
+maximum coordinate where its condition is true. `interpolate` enables linear
+interpolation between adjacent coordinates. Remaining sweep dimensions become
+graph axes or series.
+
+## Datasheet projections
+
+Raw analysis results stay analysis-specific. These children request
+datasheet-specific projections without replacing the raw results:
 
 ```tsx
-<analog.measurevoltagefrequency
-  name="switching-frequency"
-  voltageProbeRef=".SW"
-  thresholdVoltage="1.5V"
-  edge="rising"
-  startTime="4ms"
-  endTime="5ms"
+<analog.spectrum
+  name="adc-fft"
+  digitalProbeRef=".ADC_CODE"
+  startTime="1ms"
+  endTime="2ms"
+  window="blackman-harris"
+/>
+
+<analog.histogram
+  name="offset-distribution"
+  measurementRef=".input-offset"
+  binCount={50}
+/>
+
+<analog.eyediagram
+  name="output-eye"
+  voltageProbeRef=".DATA_OUT"
+  bitRate="10Gbps"
+  clockRecovery="first-order-pll"
+  mask="./usb-eye-mask.json"
 />
 ```
 
-Crossing times are linearly interpolated. The frequency is the number of
-intervals divided by the time between the first and last crossing.
-`crossingHoldoff` may be set to ignore switching edges within a burst and
-measure the burst frequency instead. At least two accepted crossings are
-required.
+`<analog.spectrum>` accepts exactly one of `voltageProbeRef`,
+`currentProbeRef`, or `digitalProbeRef`. It produces complex bins and derived
+metrics. `<analog.histogram>` accepts a measurement or digital probe.
+`<analog.eyediagram>` preserves folded samples, eye height, eye width, crossing
+percentage, jitter, and mask violations.
+
+A `<digitalprobe>` records one pin or an ordered bus. It emits digital samples
+without discarding the underlying analog voltage probes used to validate input
+and output levels.
+
+## Simulation models
+
+Experiments are independent of model origin. A component may use a SPICE,
+PSpice, TINA, Verilog-A, IBIS, or Touchstone model:
+
+```tsx
+<chip
+  name="U1"
+  simulationModel={
+    <simulationmodel
+      format="spice"
+      source="./models/U1.lib"
+      pinMapping={{ VIN: "1", GND: "2", VOUT: "3" }}
+      provenance="vendor"
+      modeledEffects={["switching", "protection", "quiescent-current"]}
+      omittedEffects={["self-heating"]}
+    />
+  }
+/>
+```
+
+`format` is a versioned model-format identifier. The names above are standard;
+other formats use a reverse-domain identifier and produce an explicit
+unsupported-format error when no engine can run them.
+
+`provenance` is `"vendor"`, `"measured"`, or `"derived"`. A derived model must
+list its assumptions. All models may declare valid conditions, modeled
+effects, omitted effects, and reference curves.
+
+When no vendor model exists, a circuit author may provide a SPICE or Verilog-A
+behavioral model derived from available measurements and documentation. The
+model asset is immutable during an experiment; parameter sweeps use declared
+model parameters rather than editing model text.
+
+This contract makes missing and approximate behavior visible. It does not
+claim that undocumented silicon behavior can be inferred without evidence.
 
 ## Circuit JSON
 
-Each TSX simulation emits a `simulation_experiment`. The existing
-`experiment_type` values remain:
+Each analysis emits a `simulation_experiment` with one of these
+`experiment_type` values:
 
-| TSX element | `experiment_type` |
+| Analysis | `experiment_type` |
 | --- | --- |
-| `analog.transientsimulation` | `spice_transient_analysis` |
-| `analog.dcoperatingpointsimulation` | `spice_dc_operating_point` |
-| `analog.dcsweepsimulation` | `spice_dc_sweep` |
-| `analog.acsweepsimulation` | `spice_ac_analysis` |
+| DC operating point | `spice_dc_operating_point` |
+| Direct DC sweep | `spice_dc_sweep` |
+| Transient | `spice_transient_analysis` |
+| AC sweep | `spice_ac_analysis` |
+| Noise | `spice_noise_analysis` |
+| S-parameters | `s_parameter_analysis` |
+| Harmonic balance | `harmonic_balance_analysis` |
 
-Analysis props are stored directly on the experiment. For example:
+Model declarations emit `simulation_model` with `model_format`,
+`source_asset_id`, `source_sha256`, pin mapping, provenance, valid conditions,
+modeled effects, omitted effects, assumptions, and reference curves. Arbitrary
+waveforms remain source-specific: `simulation_voltage_source` stores
+`voltage` points, `simulation_current_source` stores `current` points, and
+`simulation_model_parameter_source` stores environmental or model-input
+points.
 
-```json
-{
-  "type": "simulation_experiment",
-  "simulation_experiment_id": "simulation_experiment_frequency_response",
-  "name": "frequency-response",
-  "experiment_type": "spice_ac_analysis",
-  "ac_sweep_type": "decade",
-  "ac_samples_per_interval": 20,
-  "ac_start_frequency_hz": 10,
-  "ac_stop_frequency_hz": 1000000
-}
-```
-
-### Analysis-specific results
-
-Circuit JSON uses result types specific to the analysis and measured quantity.
-There is no generic `simulation_analysis_result`.
-
-| Analysis | Voltage result | Current result |
-| --- | --- | --- |
-| Transient | `simulation_transient_voltage_graph` | `simulation_transient_current_graph` |
-| DC operating point | `simulation_dc_operating_point_voltage` | `simulation_dc_operating_point_current` |
-| DC sweep | `simulation_dc_sweep_voltage_graph` | `simulation_dc_sweep_current_graph` |
-| AC sweep | `simulation_ac_sweep_voltage_graph` | `simulation_ac_sweep_current_graph` |
-
-The existing transient graph elements stay unchanged. They remain suitable for
-time-domain behavior such as current-flow animation.
-
-A DC operating-point voltage is a scalar:
+Each deterministic sweep emits `simulation_parameter_sweep`,
+`simulation_source_parameter_sweep`, or
+`simulation_model_parameter_sweep` according to its TSX element.
+Results replace the singular `simulation_parameter_sweep_coordinate` with the
+ordered `simulation_parameter_sweep_coordinates` array:
 
 ```json
 {
-  "type": "simulation_dc_operating_point_voltage",
-  "simulation_dc_operating_point_voltage_id": "simulation_dc_operating_point_voltage_vout",
-  "simulation_experiment_id": "simulation_experiment_bias_point",
-  "simulation_voltage_probe_id": "simulation_voltage_probe_vout",
-  "voltage": 3.3
-}
-```
-
-An AC voltage graph stores complex voltage samples against frequency:
-
-```json
-{
-  "type": "simulation_ac_sweep_voltage_graph",
-  "simulation_ac_sweep_voltage_graph_id": "simulation_ac_sweep_voltage_graph_vout",
-  "simulation_experiment_id": "simulation_experiment_frequency_response",
-  "simulation_voltage_probe_id": "simulation_voltage_probe_vout",
-  "frequencies_hz": [10, 12.589, 15.849],
-  "complex_voltages": [
-    { "re": 0.99, "im": -0.01 },
-    { "re": 0.98, "im": -0.02 },
-    { "re": 0.96, "im": -0.04 }
+  "simulation_parameter_sweep_coordinates": [
+    {
+      "simulation_parameter_sweep_id": "simulation_parameter_sweep_vin",
+      "sweep_index": 2,
+      "parameter_value": 3.3,
+      "parameter_unit": "V"
+    },
+    {
+      "simulation_parameter_sweep_id": "simulation_parameter_sweep_load",
+      "sweep_index": 40,
+      "parameter_value": 1,
+      "parameter_unit": "A"
+    }
   ]
 }
 ```
 
-The current form uses `complex_currents` with the same `{ "re", "im" }`
-shape. The frequency and complex-value arrays always have the same length. DC
-sweep graphs use `sweep_values`, `sweep_unit`, and either `voltage_levels` or
-`current_levels`.
-
-### Parameter sweep relationships
-
-`<analog.sweepparameter>` emits a `simulation_parameter_sweep`. Its target ID
-is specific to `parameter_type`; this resistance example uses
-`resistor_source_component_id`:
+A scalar declaration stores the expression, expected unit, and dependencies:
 
 ```json
 {
-  "type": "simulation_parameter_sweep",
-  "simulation_parameter_sweep_id": "simulation_parameter_sweep_load",
-  "simulation_experiment_id": "simulation_experiment_load_response",
-  "name": "load-resistance",
-  "parameter_type": "resistance",
-  "resistor_source_component_id": "source_component_rload",
-  "parameter_values": [100, 330, 1000, 3300, 10000],
-  "parameter_unit": "Ω"
+  "type": "simulation_measurement",
+  "simulation_measurement_id": "simulation_measurement_efficiency",
+  "simulation_experiment_id": "simulation_experiment_efficiency",
+  "name": "efficiency",
+  "expression": "100 * abs(mean(V(\".VOUT\") * I(\".IOUT\"))) / abs(mean(V(\".VIN\") * I(\".IIN\")))",
+  "output_unit": "%",
+  "simulation_voltage_probe_ids": [
+    "simulation_voltage_probe_vout",
+    "simulation_voltage_probe_vin"
+  ],
+  "simulation_current_probe_ids": [
+    "simulation_current_probe_iout",
+    "simulation_current_probe_iin"
+  ]
 }
 ```
 
-Each coordinate emits one point:
+Circuit JSON keeps result types specific to their semantics:
 
-```json
-{
-  "type": "simulation_parameter_sweep_point",
-  "simulation_parameter_sweep_point_id": "simulation_parameter_sweep_point_2",
-  "simulation_parameter_sweep_id": "simulation_parameter_sweep_load",
-  "sweep_index": 1,
-  "parameter_value": 330,
-  "parameter_unit": "Ω"
-}
-```
+| Result | Circuit JSON type |
+| --- | --- |
+| Transient voltage | `simulation_transient_voltage_graph` |
+| Transient current | `simulation_transient_current_graph` |
+| Transient digital | `simulation_transient_digital_graph` |
+| DC operating-point voltage | `simulation_dc_operating_point_voltage` |
+| DC operating-point current | `simulation_dc_operating_point_current` |
+| DC sweep voltage | `simulation_dc_sweep_voltage_graph` |
+| DC sweep current | `simulation_dc_sweep_current_graph` |
+| AC voltage | `simulation_ac_sweep_voltage_graph` |
+| AC current | `simulation_ac_sweep_current_graph` |
+| Input/output voltage noise | `simulation_noise_voltage_graph` |
+| Input/output current noise | `simulation_noise_current_graph` |
+| S-parameters | `simulation_s_parameter_graph` |
+| Harmonic-balance voltage | `simulation_harmonic_voltage_spectrum` |
+| Harmonic-balance current | `simulation_harmonic_current_spectrum` |
+| Scalar measurement | `simulation_measurement_result` |
+| One-dimensional measurement sweep | `simulation_measurement_sweep_graph` |
+| Two-dimensional measurement sweep | `simulation_measurement_surface` |
+| Boundary across a sweep | `simulation_sweep_boundary_graph` |
+| Spectrum | `simulation_voltage_spectrum`, `simulation_current_spectrum`, or `simulation_digital_spectrum` |
+| Histogram | `simulation_measurement_histogram` or `simulation_digital_histogram` |
+| Eye diagram | `simulation_eye_diagram` |
+| Monte Carlo sample | `simulation_monte_carlo_sample` |
 
-The analysis-specific result for that run includes
-`simulation_parameter_sweep_point_id`. A transient resistance sweep therefore
-produces transient graph elements, while an AC resistance sweep produces AC
-sweep graph elements. The two are not forced into one generic result shape.
+`simulation_measurement_result` stores one value with its quantity and unit.
+Raw transient, AC, noise, S-parameter, and harmonic results are never replaced
+by a generic graph. Measurement sweep graphs only contain scalar measurement
+values against parameter coordinates. Higher sweep dimensions become separate
+series or surfaces at fixed coordinate combinations.
 
-### Scalar measurement relationships
-
-Each measurement emits a specific declaration and scalar result:
-
-| TSX element | Declaration type | Result type | Value field |
-| --- | --- | --- | --- |
-| `analog.measurevoltage` | `simulation_voltage_measurement` | `simulation_voltage_measurement_result` | `voltage` |
-| `analog.measurecurrent` | `simulation_current_measurement` | `simulation_current_measurement_result` | `current` |
-| `analog.measurevoltageregulation` | `simulation_voltage_regulation_measurement` | `simulation_voltage_regulation_measurement_result` | `regulation_percentage` |
-| `analog.measurevoltagefrequency` | `simulation_voltage_frequency_measurement` | `simulation_voltage_frequency_measurement_result` | `frequency_hz` |
-
-A measurement result from a parameter sweep includes
-`simulation_parameter_sweep_point_id`. Circuit JSON also includes one specific
-graph for the complete sweep:
-
-| Measurement | Graph type | Y-axis field |
-| --- | --- | --- |
-| Voltage | `simulation_parameter_sweep_voltage_measurement_graph` | `voltages` |
-| Current | `simulation_parameter_sweep_current_measurement_graph` | `currents` |
-| Voltage regulation | `simulation_parameter_sweep_voltage_regulation_graph` | `regulation_percentages` |
-| Voltage frequency | `simulation_parameter_sweep_voltage_frequency_graph` | `frequencies_hz` |
-
-For example:
-
-```json
-{
-  "type": "simulation_parameter_sweep_voltage_regulation_graph",
-  "simulation_parameter_sweep_voltage_regulation_graph_id": "simulation_parameter_sweep_voltage_regulation_graph_output",
-  "simulation_experiment_id": "simulation_experiment_load_regulation",
-  "simulation_parameter_sweep_id": "simulation_parameter_sweep_load_current",
-  "simulation_voltage_regulation_measurement_id": "simulation_voltage_regulation_measurement_output",
-  "parameter_values": [0.01, 0.1, 0.5, 1, 2],
-  "parameter_unit": "A",
-  "regulation_percentages": [0.12, 0.08, -0.03, -0.14, -0.31]
-}
-```
-
-The parameter and measurement arrays have the same length and preserve sweep
-order. The raw analysis-specific results remain unchanged.
+Every result references its experiment, exact model assets, deterministic
+sweep coordinates, and optional Monte Carlo sample. Partial or unsupported
+model behavior emits a `simulation_model_limitation_warning`.
 
 ## Compatibility
 
@@ -451,24 +433,21 @@ Existing transient usage remains valid:
 <analogsimulation duration="10ms" timePerStep="1us" />
 ```
 
-It continues to mean transient analysis and emits the existing
-`simulation_transient_voltage_graph` and
-`simulation_transient_current_graph` elements.
-
-New code should use `<analog.transientsimulation>`. The other
-`<analog.*simulation>` elements have no legacy spelling.
+It continues to mean transient analysis. Existing `spiceModel`,
+one-dimensional sweep coordinates, and analysis-specific result elements
+remain readable. New code uses `simulationModel` and coordinate arrays.
 
 ## Scope
 
 This RFC specifies:
 
-- TSX usage for transient, DC operating point, direct DC sweep, and AC sweep;
-- TSX usage for a one-dimensional component parameter sweep;
-- TSX usage for transient scalar measurements; and
-- the Circuit JSON experiments, sweep relationships, measurements, and
-  analysis-specific results produced by that usage.
+- model declarations and model-fidelity metadata;
+- deterministic, arbitrary, and PRBS stimuli;
+- DC, transient, AC, noise, S-parameter, and harmonic analyses;
+- nested deterministic and Monte Carlo parameter variation;
+- composable scalar measurements and boundary extraction; and
+- Circuit JSON for raw results, scalar curves, surfaces, spectra, histograms,
+  and eye diagrams.
 
-General measurement expressions, current-source pulse timing, multidimensional
-sweeps, threshold searches, engine interfaces, execution scheduling, rendering
-behavior, export formats, and package implementation order are intentionally
-left to separate proposals.
+Engine interfaces, execution scheduling, rendering behavior, export formats,
+and package implementation order are intentionally outside this RFC.
