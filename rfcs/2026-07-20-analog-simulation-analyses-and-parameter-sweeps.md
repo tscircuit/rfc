@@ -1,37 +1,36 @@
-# Analog Simulation Analyses and Datasheet Measurements
+# Analog Simulation Analyses, Stimulus, and Measurements
 
 ## Motivation
 
-tscircuit currently exposes transient, DC operating-point, DC sweep, AC sweep,
-and one-dimensional parameter sweeps. Circuit authors also need to reproduce
-datasheet curves derived from those results and run analyses used by power,
-amplifier, converter, clock, and signal-integrity devices.
+tscircuit exposes SPICE transient, DC operating-point, DC sweep, AC sweep, and
+one-dimensional parameter sweeps. Reproducing the TPS63802 application curves
+also requires arbitrary source waveforms, more than one parameter sweep, and a
+scalar calculated from each simulation result.
 
-This RFC defines the TSX and Circuit JSON for those experiments. Compiler,
-engine, scheduling, rendering, and export APIs are outside its scope.
+This RFC defines those three additions. It does not add a simulation engine,
+model format, or non-SPICE analysis.
 
-## Datasheet use cases
+## TPS63802 use cases
 
-The API is designed around recurring electrical characterization:
+The additions map directly to
+[TPS63802 application curves](https://www.ti.com/lit/ds/symlink/tps63802.pdf):
 
-| Use case | Examples | Required capability |
+| Figures | Graph | Required addition |
 | --- | --- | --- |
-| Static curves | regulation, output swing, quiescent current, INL and DNL | DC and parameter sweeps |
-| Time domain | switching, startup, line/load steps, settling | Pulse, arbitrary waveform, and transient analysis |
-| Frequency domain | gain/phase, PSRR, impedance, and noise | AC, noise, and S-parameter analysis |
-| Periodic behavior | distortion, mixing, compression, and phase noise | Harmonic-balance and periodic-noise analysis |
-| Scalar curves | efficiency, frequency, delay, SNR, and margins | Unit-checked measurements |
-| Boundaries | current capability, mode transitions, and limits | Nested sweeps and boundary extraction |
-| Variation | temperature, tolerance, process corners, and yield | Model parameters and Monte Carlo |
-| Signal integrity | PRBS response, jitter, eye opening, and masks | PRBS stimulus and eye diagrams |
+| 10-2 | Output current capability versus input voltage | Multiple parameter sweeps |
+| 10-3 and 10-4 | Switching frequency | TypeScript measurement |
+| 10-5 through 10-10 | Efficiency | Multiple parameter sweeps and TypeScript measurement |
+| 10-11 through 10-14 | Line and load regulation | Parameter sweep and TypeScript measurement |
+| 10-15 through 10-20 | Switching waveforms | Existing transient analysis |
+| 10-21 through 10-26 | Load transient | Current-source waveform |
+| 10-27 through 10-29 | Line transient | Voltage-source waveform |
+| 10-30 and 10-31 | Rising enable | Existing voltage-source pulse |
 
-Representative TI examples include
-[TPS63802](https://www.ti.com/lit/ds/symlink/tps63802.pdf) Figures 10-2 through
-10-31, [OPA191](https://www.ti.com/lit/ds/symlink/opa191.pdf) Figures 6-14
-through 6-47, [ADC3561](https://www.ti.com/lit/gpn/adc3561) Figures 6-1 through
-6-13, and
-[HD3SS3212-Q1](https://www.ti.com/lit/ds/symlink/hd3ss3212-q1.pdf) Figures 9
-through 12.
+Existing transient support already reproduces
+[Figures 10-15](https://github.com/tscircuit/ti/blob/agent/add-tps63802-analysis-simulations/lib/simulations/TPS63802-Figure-10-15-switching-waveforms-pfm-boost-operation.circuit.tsx),
+[10-16](https://github.com/tscircuit/ti/blob/agent/add-tps63802-analysis-simulations/lib/simulations/TPS63802-Figure-10-16-switching-waveforms-pfm-buck-boost-operation.circuit.tsx),
+and
+[10-17](https://github.com/tscircuit/ti/blob/agent/add-tps63802-analysis-simulations/lib/simulations/TPS63802-Figure-10-17-switching-waveforms-pfm-buck-operation.circuit.tsx).
 
 ## Usage at a glance
 
@@ -69,8 +68,8 @@ export default () => (
 )
 ```
 
-All analysis elements accept `name`. SPICE-backed analyses accept the existing
-`spiceEngine` and `spiceOptions` props.
+All four elements accept `name`, `spiceEngine`, and `spiceOptions`. Their
+analysis-specific props are described below.
 
 ## Transient simulation
 
@@ -170,24 +169,11 @@ real and imaginary values; magnitude and phase are views of those values.
 DC bias, transient waveform props, and `acMagnitude`/`acPhase` may coexist on
 the same source. They apply only to their corresponding analysis.
 
-## Additional analyses
-
-| TSX element | Required usage |
-| --- | --- |
-| `analog.noisesimulation` | AC sweep props, an output voltage/current probe, and optional input source |
-| `analog.sparametersimulation` | AC sweep props and `analog.port` children with positive/negative nets and reference impedance |
-| `analog.harmonicbalancesimulation` | One or more `fundamentals` and `harmonicCount` |
-| `analog.periodicnoisesimulation` | A fundamental, output probe, and offset-frequency sweep |
-
-Multiple harmonic-balance fundamentals cover mixers and intermodulation.
-
 ## Stimulus waveforms
 
-Voltage and current sources have matching pulse timing props:
-`pulseDelay`, `riseTime`, `fallTime`, `pulseWidth`, and `period`.
-
-Piecewise-linear points describe ramps, steps, sequences, and measured
-stimulus:
+`voltageWaveform` and `currentWaveform` define SPICE piecewise-linear sources.
+Each point has a time and a voltage or current. Points are applied in order and
+linearly interpolated.
 
 ```tsx
 <currentsource
@@ -195,37 +181,29 @@ stimulus:
   currentWaveform={[
     { time: "0ms", current: "100mA" },
     { time: "1ms", current: "100mA" },
-    { time: "1.01ms", current: "1A" },
+    { time: "1.001ms", current: "1A" },
     { time: "2ms", current: "1A" },
-    { time: "2.01ms", current: "100mA" },
+    { time: "2.001ms", current: "100mA" },
   ]}
-  repeatPeriod="3ms"
 />
 ```
-
-Voltage sources use `voltageWaveform` with `{ time, voltage }` points. Points
-are applied in order and linearly interpolated.
-
-PRBS stimulus avoids expanding millions of piecewise-linear points:
 
 ```tsx
 <voltagesource
-  name="DATA"
-  waveShape="prbs"
-  pattern="prbs31"
-  bitRate="10Gbps"
-  lowVoltage="-400mV"
-  highVoltage="400mV"
-  riseTime="35ps"
-  fallTime="35ps"
-  randomJitterRms="1ps"
-  sinusoidalJitterFrequency="10MHz"
-  sinusoidalJitterAmplitude="2ps"
-  randomSeed={7}
+  name="VIN"
+  voltageWaveform={[
+    { time: "0ms", voltage: "2.2V" },
+    { time: "1ms", voltage: "2.2V" },
+    { time: "1.001ms", voltage: "4.2V" },
+    { time: "2ms", voltage: "4.2V" },
+    { time: "2.001ms", voltage: "2.2V" },
+  ]}
 />
 ```
 
-`randomSeed` makes the PRBS and random jitter reproducible.
+Raw times use milliseconds, raw voltages use volts, and raw currents use
+amperes. Times must be nonnegative and strictly increasing. A source cannot use
+a piecewise-linear waveform and a periodic `waveShape` at the same time.
 
 ## Component parameter sweeps
 
@@ -286,23 +264,11 @@ use `start`, `stop`, and `step`:
 />
 ```
 
-## Multidimensional and additional parameter sweeps
+## Multiple parameter sweeps
 
-More than one `<analog.sweepparameter>` is allowed. The simulation runs their
-Cartesian product in child order. The same element adds these variants:
-
-| `parameterType` | Required target |
-| --- | --- |
-| `"temperature"` | No target |
-| `"source"` | `sourceParameter` and exactly one of `voltageSourceRef` or `currentSourceRef` |
-| `"model"` | `componentRef` and `modelParameter` |
-
-The `"source"` variant changes `frequency`, `phase`, `duty_cycle`, pulse
-timing, PRBS bit rate, or jitter. The `"model"` variant changes a parameter
-declared by the selected component model. All variants use the existing
-`values` or `start`/`stop`/`step` coordinates.
-
-This experiment finds output-current capability versus input voltage:
+More than one `<analog.sweepparameter>` may be nested in a simulation. The
+simulation runs the Cartesian product in child order. This only extends the
+existing resistance, capacitance, inductance, voltage, and current variants.
 
 ```tsx
 <analog.transientsimulation
@@ -324,156 +290,50 @@ This experiment finds output-current capability versus input voltage:
     stop="3A"
     step="25mA"
   />
-  <analog.measure
-    name="settled-output"
-    expression='mean(V(".VOUT"), from=4ms, to=5ms)'
-    outputUnit="V"
-  />
-  <analog.findboundary
-    name="maximum-load"
-    sweepRef=".load-current"
-    where='M(".settled-output") >= 3.234V'
-    choose="maximum"
-  />
 </analog.transientsimulation>
 ```
 
-`<analog.findboundary>` selects the minimum or maximum coordinate where its
-condition is true. Other sweep coordinates remain attached to the result.
-
-## Monte Carlo
-
-`<analog.montecarlo>` accepts `sampleCount` and `randomSeed`.
-`<analog.montecarloparameter>` children use the same `parameterType` and target
-props as `<analog.sweepparameter>`, but replace coordinates with a uniform,
-normal, or explicit distribution. Monte Carlo may be nested inside
-deterministic sweeps.
-
-```tsx
-<analog.montecarlo sampleCount={1000} randomSeed={7}>
-  <analog.montecarloparameter
-    parameterType="resistance"
-    resistorRef=".R1"
-    distribution="normal"
-    mean="10kΩ"
-    standardDeviation="100Ω"
-  />
-</analog.montecarlo>
-```
+Figure 10-2 can select the highest load-current coordinate whose settled output
+remains in regulation. That selection is ordinary result processing, not a
+separate simulation element.
 
 ## Measurements
 
-`<analog.measure>` produces one unit-checked scalar from raw results:
+`<analog.measurement>` runs a TypeScript function after each simulation and
+produces one scalar:
 
 ```tsx
-<analog.measure
-  name="efficiency"
-  expression='100 * abs(mean(V(".VOUT") * I(".IOUT"))) / abs(mean(V(".VIN") * I(".IIN")))'
-  outputUnit="%"
-/>
+const mean = (samples: number[]) =>
+  samples.reduce((sum, sample) => sum + sample, 0) / samples.length
 
-<analog.measure
-  name="burst-frequency"
-  expression='frequency(V(".SW"), threshold=1.5V, edge="rising", holdoff=20us)'
-  outputUnit="Hz"
-/>
+export default () => (
+  <analog.measurement
+    name="settled-output-voltage"
+    unit="V"
+    measureFn={({ selectOne }) => {
+      const output = selectOne(".VOUT")
+      if (output.type !== "simulation_transient_voltage_graph") {
+        throw new Error("VOUT must resolve to a transient voltage graph")
+      }
+      return mean(output.voltage_levels.slice(-1000))
+    }}
+  />
+)
 ```
 
-The expression language is not JavaScript. `V(selector)`, `I(selector)`, and
-`D(selector)` select real, complex, or digital probe samples; `M(name)` selects
-another measurement. Unit-bearing literals, arithmetic, comparisons, windows,
-sweep coordinates, `mean`, `min`, `max`, `rms`, `integral`, `crossings`, and
-`fft` are composable. Expressions are deterministic and unit checked. Named
-metrics such as frequency, settling time, THD, and SNR are functions in the
-versioned expression language; adding one does not add a TSX element or Circuit
-JSON result type.
+`selectOne` accepts a tscircuit selector and returns one analysis-specific
+Circuit JSON result. The function returns a finite number in the declared
+`unit`. It runs once per parameter-sweep coordinate after the raw results for
+that coordinate are available.
 
-## Datasheet projections
-
-Raw results remain analysis-specific. These children request structured
-post-processing:
-
-```tsx
-<analog.spectrum
-  name="adc-fft"
-  digitalProbeRef=".ADC_CODE"
-  startTime="1ms"
-  endTime="2ms"
-  window="blackman_harris"
-/>
-
-<analog.histogram
-  name="offset-distribution"
-  measurementRef=".input-offset"
-  binCount={50}
-/>
-
-<analog.eyediagram
-  name="output-eye"
-  voltageProbeRef=".DATA_OUT"
-  bitRate="10Gbps"
-  clockRecovery="first_order_pll"
-  clockRecoveryBandwidth="5MHz"
-  mask={usbEyeMask}
-/>
-```
-
-`<analog.spectrum>` accepts exactly one voltage, current, or digital probe.
-`<analog.histogram>` accepts a measurement or digital probe.
-`<analog.eyediagram>` preserves folded samples, eye metrics, jitter, and mask
-violations. A `<digitalprobe>` records one pin or an ordered bus.
-
-These projections have specific Circuit JSON results because their stored
-samples and downstream behavior differ. A line, surface, or table made from
-the same scalar measurement points does not get a new result type.
-
-## Simulation models
-
-`simulationModel` accepts a format-specific model element:
-
-| Model element | Use |
-| --- | --- |
-| `spicemodel` | SPICE, PSpice, or TINA-TI subcircuit |
-| `verilogamodel` | Verilog-A behavioral model |
-| `ibismodel` | IBIS digital I/O model |
-| `ibisamimodel` | IBIS-AMI SerDes model |
-| `touchstonemodel` | Touchstone multiport network |
-
-Each element owns the mapping appropriate to its format. For example,
-`spicemodel` uses `spicePinMapping`, while `touchstonemodel` uses
-`portMapping`. A SPICE model may declare its `dialect` as `"spice"`,
-`"pspice"`, or `"tina_ti"`.
-
-```tsx
-<chip
-  name="U1"
-  simulationModel={
-    <spicemodel
-      source={u1ModelSource}
-      spicePinMapping={{ VIN: "1", GND: "2", VOUT: "3" }}
-      dialect="pspice"
-      provenance="vendor"
-      modeledEffects={["switching", "protection", "quiescent_current"]}
-      omittedEffects={["self_heating"]}
-    />
-  }
-/>
-```
-
-`provenance` is `"vendor"`, `"measured"`, or `"derived"`. A derived model must
-list its assumptions. Model elements may declare valid conditions, modeled
-effects, omitted effects, and adjustable parameters.
-
-When no vendor model exists, a circuit author may provide a SPICE or Verilog-A
-model derived from available measurements and documentation. Model source is
-immutable during an experiment; sweeps use declared model parameters rather
-than editing source text. This does not claim undocumented behavior can be
-inferred without evidence. A model format still requires an engine that
-implements that format.
+The function is TypeScript source and is not serialized into Circuit JSON.
+Only its result is emitted. Frequency, efficiency, and regulation calculations
+therefore use normal TypeScript instead of a new expression language.
 
 ## Circuit JSON
 
-Each TSX simulation emits a `simulation_experiment`:
+Each TSX simulation emits a `simulation_experiment`. The existing
+`experiment_type` values remain:
 
 | TSX element | `experiment_type` |
 | --- | --- |
@@ -481,10 +341,6 @@ Each TSX simulation emits a `simulation_experiment`:
 | `analog.dcoperatingpointsimulation` | `spice_dc_operating_point` |
 | `analog.dcsweepsimulation` | `spice_dc_sweep` |
 | `analog.acsweepsimulation` | `spice_ac_analysis` |
-| `analog.noisesimulation` | `spice_noise_analysis` |
-| `analog.sparametersimulation` | `s_parameter_analysis` |
-| `analog.harmonicbalancesimulation` | `harmonic_balance_analysis` |
-| `analog.periodicnoisesimulation` | `periodic_noise_analysis` |
 
 Analysis props are stored directly on the experiment. For example:
 
@@ -500,12 +356,6 @@ Analysis props are stored directly on the experiment. For example:
   "ac_stop_frequency_hz": 1000000
 }
 ```
-
-Noise fields name the output probe, optional input source, and frequency sweep.
-Each `<analog.port>` emits a `simulation_port` referenced by an S-parameter
-experiment. Harmonic-balance experiments store their fundamentals and harmonic
-count. Periodic-noise experiments store their fundamental, output probe, and
-offset-frequency sweep.
 
 ### Analysis-specific results
 
@@ -556,35 +406,24 @@ shape. The frequency and complex-value arrays always have the same length. DC
 sweep graphs use `sweep_values`, `sweep_unit`, and either `voltage_levels` or
 `current_levels`.
 
-### Additional results
+### Source waveforms
 
-| Result | Circuit JSON type |
-| --- | --- |
-| Transient digital | `simulation_transient_digital_graph` |
-| Voltage/current noise | `simulation_noise_voltage_graph` or `simulation_noise_current_graph` |
-| S-parameters | `simulation_s_parameter_graph` |
-| Harmonic voltage/current | `simulation_harmonic_voltage_spectrum` or `simulation_harmonic_current_spectrum` |
-| Periodic voltage/current noise | `simulation_periodic_noise_voltage_graph` or `simulation_periodic_noise_current_graph` |
-| Phase noise | `simulation_phase_noise_graph` |
-| Scalar measurement | `simulation_measurement_result` |
-| Voltage/current/digital spectrum | `simulation_voltage_spectrum`, `simulation_current_spectrum`, or `simulation_digital_spectrum` |
-| Measurement/digital histogram | `simulation_measurement_histogram` or `simulation_digital_histogram` |
-| Eye diagram | `simulation_eye_diagram_graph` |
+Waveform points remain on the existing source elements:
 
-These types remain specific because their axes, samples, units, probe
-references, and downstream behavior differ.
+```json
+{
+  "type": "simulation_current_source",
+  "simulation_current_source_id": "simulation_current_source_iload",
+  "current_waveform": [
+    { "time_ms": 0, "current": 0.1 },
+    { "time_ms": 1, "current": 0.1 },
+    { "time_ms": 1.001, "current": 1 }
+  ]
+}
+```
 
-Noise graphs store frequency and voltage or current noise density. S-parameter
-graphs store frequency and a complex matrix indexed by port. Harmonic results
-store harmonic frequencies and complex voltage or current. Phase-noise graphs
-store offset frequency and dBc/Hz.
-
-`<digitalprobe>` emits `simulation_digital_probe`; transient digital graphs
-store timestamps and logic levels. `<analog.spectrum>`,
-`<analog.histogram>`, and `<analog.eyediagram>` emit `simulation_spectrum`,
-`simulation_histogram`, and `simulation_eye_diagram` requests. Their result
-types store complex bins, bins and counts, or folded eye samples and mask
-violations respectively.
+`simulation_voltage_source` uses `voltage_waveform` with `time_ms` and
+`voltage`.
 
 ### Parameter sweep relationships
 
@@ -605,30 +444,28 @@ is specific to `parameter_type`; this resistance example uses
 }
 ```
 
-Each coordinate emits one point:
+Each analysis result currently carries one
+`simulation_parameter_sweep_coordinate`:
 
 ```json
 {
-  "type": "simulation_parameter_sweep_point",
-  "simulation_parameter_sweep_point_id": "simulation_parameter_sweep_point_2",
-  "simulation_parameter_sweep_id": "simulation_parameter_sweep_load",
-  "sweep_index": 1,
-  "parameter_value": 330,
-  "parameter_unit": "Ω"
+  "simulation_parameter_sweep_coordinate": {
+    "simulation_parameter_sweep_id": "simulation_parameter_sweep_load",
+    "sweep_index": 1,
+    "parameter_value": 330,
+    "parameter_unit": "Ω"
+  }
 }
 ```
 
-The analysis-specific result for that run includes
-`simulation_parameter_sweep_point_id`. A transient resistance sweep therefore
-produces transient graph elements, while an AC resistance sweep produces AC
-sweep graph elements. The two are not forced into one generic result shape.
+A transient resistance sweep produces transient graph elements, while an AC
+resistance sweep produces AC sweep graph elements. The two are not forced into
+one generic result shape.
 
 ### Multidimensional sweep relationships
 
-Every deterministic `<analog.sweepparameter>` emits the existing
-`simulation_parameter_sweep`. Its `parameter_type` selects the corresponding
-target fields. Multidimensional results replace the singular
-`simulation_parameter_sweep_coordinate` with an ordered
+Every `<analog.sweepparameter>` emits the existing
+`simulation_parameter_sweep`. Results from multiple sweeps use an ordered
 `simulation_parameter_sweep_coordinates` array:
 
 ```json
@@ -650,46 +487,33 @@ target fields. Multidimensional results replace the singular
 }
 ```
 
-The new `parameter_type` values are `"temperature"`, `"source"`, and
-`"model"`. Source sweeps store `source_parameter` and exactly one simulation
-voltage- or current-source ID. Model sweeps store `source_component_id` and
-`model_parameter`.
+One-dimensional results keep the singular field for compatibility.
 
-`<analog.measure>` emits `simulation_measurement` with
-`measurement_type: "expression"`, the expression,
-`expression_language: "tscircuit_measurement_v1"`, expected unit, and probe
-dependencies. `<analog.findboundary>` emits the same type with
-`measurement_type: "sweep_boundary"`, its sweep ID, condition, and
-minimum/maximum selection.
+### Measurement results
 
-`simulation_measurement_result` stores `measurement`, `measurement_unit`, and
-its sweep coordinates. Repeating it at different
-coordinates represents curves, surfaces, higher-dimensional sweeps, and
-boundaries without presentation-specific Circuit JSON types.
+`<analog.measurement>` emits one `simulation_measurement_result` for each
+coordinate:
 
-`simulation_monte_carlo` stores the sample count and seed.
-`simulation_monte_carlo_parameter` stores each distribution.
-`simulation_monte_carlo_sample` stores one sample index and its realized
-parameter values. Results reference the sample; the sample is not itself a
-result. Normal distributions store `mean` and `standard_deviation`; uniform
-distributions store `minimum` and `maximum`; explicit distributions store
-their weighted coordinates.
+```json
+{
+  "type": "simulation_measurement_result",
+  "simulation_measurement_result_id": "simulation_measurement_result_vout_2",
+  "simulation_experiment_id": "simulation_experiment_load_response",
+  "name": "settled-output-voltage",
+  "measurement": 3.298,
+  "measurement_unit": "V",
+  "simulation_parameter_sweep_coordinates": [
+    {
+      "simulation_parameter_sweep_id": "simulation_parameter_sweep_load",
+      "sweep_index": 1,
+      "parameter_value": 330,
+      "parameter_unit": "Ω"
+    }
+  ]
+}
+```
 
-Model declarations remain format-specific:
-
-| TSX model | Circuit JSON type | Source |
-| --- | --- | --- |
-| `spicemodel` | `simulation_spice_subcircuit` | `subcircuit_source` |
-| `verilogamodel` | `simulation_verilog_a_model` | `verilog_a_source` |
-| `ibismodel` | `simulation_ibis_model` | `ibis_source` |
-| `ibisamimodel` | `simulation_ibis_ami_model` | IBIS and AMI sources plus algorithm-model assets |
-| `touchstonemodel` | `simulation_touchstone_model` | `touchstone_source` |
-
-The existing SPICE source and pin-map fields stay unchanged. Every model type
-adds `provenance`, `valid_conditions`, `assumptions`, `modeled_effects`,
-`omitted_effects`, and `adjustable_parameters`. Voltage and current waveform
-points remain on `simulation_voltage_source` and
-`simulation_current_source`.
+The result contains no serialized function.
 
 ## Compatibility
 
@@ -704,20 +528,18 @@ It continues to mean transient analysis and emits the existing
 `simulation_transient_current_graph` elements.
 
 New code should use `<analog.transientsimulation>`. The other
-`<analog.*simulation>` elements have no legacy spelling. Existing `spiceModel`
-continues to accept `spicemodel`; `simulationModel` accepts every model
-element. Existing one-dimensional sweep coordinates remain readable.
+`<analog.*simulation>` elements have no legacy spelling. Existing
+one-dimensional sweep coordinates remain readable.
 
 ## Scope
 
 This RFC specifies:
 
-- TSX and Circuit JSON for the listed analyses;
-- deterministic, arbitrary, and PRBS stimulus;
-- nested deterministic and Monte Carlo variation;
-- composable measurements and boundary extraction;
-- format-specific simulation models; and
-- specific raw, spectrum, histogram, and eye-diagram results.
+- piecewise-linear voltage and current sources;
+- multiple existing parameter sweeps on one SPICE simulation;
+- TypeScript scalar measurements; and
+- the corresponding Circuit JSON fields and measurement results.
 
 Engine interfaces, execution scheduling, rendering behavior, export formats,
-and package implementation order are outside this RFC.
+model formats, new analyses, Monte Carlo, and package implementation order are
+outside this RFC.
