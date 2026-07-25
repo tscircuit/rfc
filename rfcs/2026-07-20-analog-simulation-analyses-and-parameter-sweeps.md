@@ -1,4 +1,4 @@
-# Analog Simulation Analyses and Parameter Sweeps
+# Analog Simulation Analyses, Parameter Sweeps, and Scalar Measurements
 
 ## Motivation
 
@@ -208,7 +208,87 @@ use `start`, `stop`, and `step`:
 
 Exactly one sweep parameter is allowed per simulation in this RFC. Each value
 produces the same result type as the parent simulation, linked to its sweep
-point. Scalar reductions and multidimensional sweeps are separate proposals.
+point. Multidimensional sweeps are a separate proposal.
+
+## Scalar measurements
+
+Measurements reduce a transient probe graph to one scalar. When the simulation
+has a parameter sweep, the measurement runs once for every sweep point.
+
+`<analog.measurevoltage>` and `<analog.measurecurrent>` select a probe and a
+calculation:
+
+```tsx
+<analog.transientsimulation
+  name="load-regulation"
+  duration="5ms"
+  timePerStep="1us"
+>
+  <analog.sweepparameter
+    name="load-current"
+    parameterType="current"
+    currentSourceRef=".ILOAD"
+    values={["10mA", "100mA", "500mA", "1A", "2A"]}
+  />
+  <analog.measurevoltage
+    name="settled-output"
+    voltageProbeRef=".VOUT"
+    calculation="mean"
+    startTime="4ms"
+    endTime="5ms"
+  />
+</analog.transientsimulation>
+```
+
+`<analog.measurecurrent>` uses `currentProbeRef`. Both elements support:
+
+| `calculation` | Result |
+| --- | --- |
+| `"mean"` | Time-weighted mean |
+| `"minimum"` | Minimum sample |
+| `"maximum"` | Maximum sample |
+| `"peak-to-peak"` | Maximum minus minimum |
+| `"rms"` | Time-weighted root mean square |
+| `"final"` | Last sample |
+
+`startTime` and `endTime` are optional, but must be supplied together. They
+default to the full recorded interval. Raw numbers use milliseconds.
+
+`<analog.measurevoltageregulation>` returns the percentage difference between
+the mean measured voltage and `nominalVoltage`:
+
+```tsx
+<analog.measurevoltageregulation
+  name="output-regulation"
+  voltageProbeRef=".VOUT"
+  nominalVoltage="3.3V"
+  startTime="4ms"
+  endTime="5ms"
+/>
+```
+
+The result is
+`100 * (mean measured voltage - nominal voltage) / nominal voltage`.
+
+`<analog.measurevoltagefrequency>` measures the frequency of rising or falling
+threshold crossings:
+
+```tsx
+<analog.measurevoltagefrequency
+  name="switching-frequency"
+  voltageProbeRef=".SW"
+  thresholdVoltage="1.5V"
+  edge="rising"
+  startTime="4ms"
+  endTime="5ms"
+/>
+```
+
+Crossing times are linearly interpolated. The frequency is the number of
+intervals divided by the time between the first and last crossing.
+`crossingHoldoff` may be set to ignore switching edges within a burst and
+measure the burst frequency instead. At least two accepted crossings are
+required.
 
 ## Circuit JSON
 
@@ -323,6 +403,46 @@ The analysis-specific result for that run includes
 produces transient graph elements, while an AC resistance sweep produces AC
 sweep graph elements. The two are not forced into one generic result shape.
 
+### Scalar measurement relationships
+
+Each measurement emits a specific declaration and scalar result:
+
+| TSX element | Declaration type | Result type | Value field |
+| --- | --- | --- | --- |
+| `analog.measurevoltage` | `simulation_voltage_measurement` | `simulation_voltage_measurement_result` | `voltage` |
+| `analog.measurecurrent` | `simulation_current_measurement` | `simulation_current_measurement_result` | `current` |
+| `analog.measurevoltageregulation` | `simulation_voltage_regulation_measurement` | `simulation_voltage_regulation_measurement_result` | `regulation_percentage` |
+| `analog.measurevoltagefrequency` | `simulation_voltage_frequency_measurement` | `simulation_voltage_frequency_measurement_result` | `frequency_hz` |
+
+A measurement result from a parameter sweep includes
+`simulation_parameter_sweep_point_id`. Circuit JSON also includes one specific
+graph for the complete sweep:
+
+| Measurement | Graph type | Y-axis field |
+| --- | --- | --- |
+| Voltage | `simulation_parameter_sweep_voltage_measurement_graph` | `voltages` |
+| Current | `simulation_parameter_sweep_current_measurement_graph` | `currents` |
+| Voltage regulation | `simulation_parameter_sweep_voltage_regulation_graph` | `regulation_percentages` |
+| Voltage frequency | `simulation_parameter_sweep_voltage_frequency_graph` | `frequencies_hz` |
+
+For example:
+
+```json
+{
+  "type": "simulation_parameter_sweep_voltage_regulation_graph",
+  "simulation_parameter_sweep_voltage_regulation_graph_id": "simulation_parameter_sweep_voltage_regulation_graph_output",
+  "simulation_experiment_id": "simulation_experiment_load_regulation",
+  "simulation_parameter_sweep_id": "simulation_parameter_sweep_load_current",
+  "simulation_voltage_regulation_measurement_id": "simulation_voltage_regulation_measurement_output",
+  "parameter_values": [0.01, 0.1, 0.5, 1, 2],
+  "parameter_unit": "A",
+  "regulation_percentages": [0.12, 0.08, -0.03, -0.14, -0.31]
+}
+```
+
+The parameter and measurement arrays have the same length and preserve sweep
+order. The raw analysis-specific results remain unchanged.
+
 ## Compatibility
 
 Existing transient usage remains valid:
@@ -343,10 +463,12 @@ New code should use `<analog.transientsimulation>`. The other
 This RFC specifies:
 
 - TSX usage for transient, DC operating point, direct DC sweep, and AC sweep;
-- TSX usage for a one-dimensional component parameter sweep; and
-- the Circuit JSON experiments, sweep relationships, and analysis-specific
-  results produced by that usage.
+- TSX usage for a one-dimensional component parameter sweep;
+- TSX usage for transient scalar measurements; and
+- the Circuit JSON experiments, sweep relationships, measurements, and
+  analysis-specific results produced by that usage.
 
-Measurement expressions, scalar reductions, multidimensional sweeps, engine
-interfaces, execution scheduling, rendering behavior, export formats, and
-package implementation order are intentionally left to separate proposals.
+General measurement expressions, current-source pulse timing, multidimensional
+sweeps, threshold searches, engine interfaces, execution scheduling, rendering
+behavior, export formats, and package implementation order are intentionally
+left to separate proposals.
