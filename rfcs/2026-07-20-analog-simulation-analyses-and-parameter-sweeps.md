@@ -1,4 +1,4 @@
-# Analog Simulation Analyses, Stimulus, and Measurements
+# SPICE Simulation Analyses, Stimulus, and Measurements
 
 ## Motivation
 
@@ -7,12 +7,14 @@ one-dimensional parameter sweeps. Reproducing the TPS63802 application curves
 also requires arbitrary source waveforms, more than one parameter sweep, and a
 scalar calculated from each simulation result.
 
-This RFC defines those three additions. It does not add a simulation engine,
-model format, or non-SPICE analysis.
+TI also publishes complete PSpice test benches, and SPICE engines support
+analyses beyond the typed tscircuit elements. This RFC adds a complete-netlist
+escape hatch so tscircuit does not block any SPICE deck supported by the
+selected engine. It does not add a non-SPICE simulation format.
 
-## TPS63802 use cases
+## SPICE use cases
 
-The additions map directly to
+The typed additions map directly to
 [TPS63802 application curves](https://www.ti.com/lit/ds/symlink/tps63802.pdf):
 
 | Figures | Graph | Required addition |
@@ -27,10 +29,18 @@ The additions map directly to
 | 10-30 and 10-31 | Rising enable | Existing voltage-source pulse |
 
 Existing transient support already reproduces
-[Figures 10-15](https://github.com/tscircuit/ti/blob/agent/add-tps63802-analysis-simulations/lib/simulations/TPS63802-Figure-10-15-switching-waveforms-pfm-boost-operation.circuit.tsx),
-[10-16](https://github.com/tscircuit/ti/blob/agent/add-tps63802-analysis-simulations/lib/simulations/TPS63802-Figure-10-16-switching-waveforms-pfm-buck-boost-operation.circuit.tsx),
+[Figures 10-15](https://github.com/tscircuit/ti/blob/de6f200/lib/simulations/TPS63802-Figure-10-15-switching-waveforms-pfm-boost-operation.circuit.tsx),
+[10-16](https://github.com/tscircuit/ti/blob/de6f200/lib/simulations/TPS63802-Figure-10-16-switching-waveforms-pfm-buck-boost-operation.circuit.tsx),
 and
-[10-17](https://github.com/tscircuit/ti/blob/agent/add-tps63802-analysis-simulations/lib/simulations/TPS63802-Figure-10-17-switching-waveforms-pfm-buck-operation.circuit.tsx).
+[10-17](https://github.com/tscircuit/ti/blob/de6f200/lib/simulations/TPS63802-Figure-10-17-switching-waveforms-pfm-buck-operation.circuit.tsx).
+
+For analyses without a typed tscircuit element, `<analog.spicesimulation>`
+runs a complete netlist. This covers the analyses and output statements
+documented by the
+[ngspice manual](https://ngspice.sourceforge.io/docs/ngspice-manual.pdf) and
+vendor decks from
+[PSpice for TI](https://www.ti.com/tool/PSPICE-FOR-TI), when the selected
+engine supports their syntax and models.
 
 ## Usage at a glance
 
@@ -68,8 +78,38 @@ export default () => (
 )
 ```
 
-All four elements accept `name`, `spiceEngine`, and `spiceOptions`. Their
-analysis-specific props are described below.
+The four typed elements accept `name`, `spiceEngine`, and `spiceOptions`.
+Their analysis-specific props are described below.
+
+## Complete SPICE netlists
+
+`<analog.spicesimulation>` runs a complete SPICE netlist without requiring a
+typed TSX element for every engine analysis:
+
+```tsx
+export default () => (
+  <analog.spicesimulation
+    name="tps63802-vendor-testbench"
+    spiceEngine="pspice"
+    source={vendorTestbenchSource}
+    includes={{ "TPS63802_TRANS.lib": vendorModelSource }}
+  />
+)
+```
+
+`source` contains the complete netlist, including its analysis and output
+statements. `includes` maps relative `.include` paths to their source text.
+Paths are matched exactly and cannot be absolute or contain `..`.
+
+The selected engine determines the accepted SPICE dialect. The element stores
+the source and model parameters unchanged; any compatibility translation is
+explicit behavior of the selected engine adapter. A PSpice deck therefore
+requires a PSpice-compatible engine. Selecting ngspice does not imply PSpice
+compatibility.
+
+A new backend-supported SPICE statement does not require another TSX element.
+A first-class tscircuit feature for its result still requires an
+analysis-specific Circuit JSON type.
 
 ## Transient simulation
 
@@ -341,6 +381,7 @@ Each TSX simulation emits a `simulation_experiment`. The existing
 | `analog.dcoperatingpointsimulation` | `spice_dc_operating_point` |
 | `analog.dcsweepsimulation` | `spice_dc_sweep` |
 | `analog.acsweepsimulation` | `spice_ac_analysis` |
+| `analog.spicesimulation` | `spice_netlist` |
 
 Analysis props are stored directly on the experiment. For example:
 
@@ -354,6 +395,22 @@ Analysis props are stored directly on the experiment. For example:
   "ac_samples_per_interval": 20,
   "ac_start_frequency_hz": 10,
   "ac_stop_frequency_hz": 1000000
+}
+```
+
+The complete-netlist form stores the source without interpreting its analysis
+statements:
+
+```json
+{
+  "type": "simulation_experiment",
+  "simulation_experiment_id": "simulation_experiment_vendor_testbench",
+  "name": "tps63802-vendor-testbench",
+  "experiment_type": "spice_netlist",
+  "spice_source": "TPS63802 vendor testbench\n.include TPS63802_TRANS.lib\n.tran 1us 5ms\n.end",
+  "spice_include_sources": {
+    "TPS63802_TRANS.lib": "TPS63802 vendor model source"
+  }
 }
 ```
 
@@ -405,6 +462,51 @@ The current form uses `complex_currents` with the same `{ "re", "im" }`
 shape. The frequency and complex-value arrays always have the same length. DC
 sweep graphs use `sweep_values`, `sweep_unit`, and either `voltage_levels` or
 `current_levels`.
+
+### Complete-netlist results
+
+An engine adapter emits an analysis-specific Circuit JSON result when one
+exists. Other complete-netlist output is preserved as SPICE plots containing
+real or complex vectors:
+
+```json
+[
+  {
+    "type": "simulation_spice_plot",
+    "simulation_spice_plot_id": "simulation_spice_plot_ac1",
+    "simulation_experiment_id": "simulation_experiment_vendor_testbench",
+    "name": "AC Analysis"
+  },
+  {
+    "type": "simulation_spice_real_vector",
+    "simulation_spice_real_vector_id": "simulation_spice_real_vector_frequency",
+    "simulation_spice_plot_id": "simulation_spice_plot_ac1",
+    "name": "frequency",
+    "vector_unit": "Hz",
+    "real_values": [10, 100, 1000],
+    "is_scale": true
+  },
+  {
+    "type": "simulation_spice_complex_vector",
+    "simulation_spice_complex_vector_id": "simulation_spice_complex_vector_vout",
+    "simulation_spice_plot_id": "simulation_spice_plot_ac1",
+    "name": "v(out)",
+    "vector_unit": "V",
+    "complex_values": [
+      { "re": 0.99, "im": -0.01 },
+      { "re": 0.95, "im": -0.08 },
+      { "re": 0.71, "im": -0.71 }
+    ]
+  }
+]
+```
+
+Each plot has at most one vector with `is_scale: true`. Native `.measure`
+scalars use `simulation_measurement_result`.
+
+These elements preserve backend output; they are not generic graph elements.
+Typed transient, DC, AC, noise, or other results remain separate whenever
+tscircuit needs analysis-specific behavior.
 
 ### Source waveforms
 
@@ -535,11 +637,15 @@ one-dimensional sweep coordinates remain readable.
 
 This RFC specifies:
 
+- complete SPICE netlists and their include sources;
+- raw SPICE plot, real-vector, and complex-vector results;
 - piecewise-linear voltage and current sources;
 - multiple existing parameter sweeps on one SPICE simulation;
 - TypeScript scalar measurements; and
 - the corresponding Circuit JSON fields and measurement results.
 
 Engine interfaces, execution scheduling, rendering behavior, export formats,
-model formats, new analyses, Monte Carlo, and package implementation order are
-outside this RFC.
+new typed analysis elements, non-SPICE model formats, and package implementation
+order are outside this RFC. A selected engine may support additional SPICE
+analyses, model syntax, Monte Carlo, or worst-case commands through the
+complete-netlist form.
