@@ -3,44 +3,26 @@
 ## Motivation
 
 tscircuit exposes SPICE transient, DC operating-point, DC sweep, AC sweep, and
-one-dimensional parameter sweeps. Reproducing the TPS63802 application curves
-also requires arbitrary source waveforms, more than one parameter sweep, and a
-scalar calculated from each simulation result.
+one-dimensional parameter sweeps. General SPICE workflows also require
+arbitrary source waveforms, more than one parameter sweep, scalar calculations,
+and complete netlists that use analyses without typed tscircuit elements.
 
-TI also publishes complete PSpice test benches, and SPICE engines support
-analyses beyond the typed tscircuit elements. This RFC adds a complete-netlist
-escape hatch so tscircuit does not block any SPICE deck supported by the
-selected engine. It does not add a non-SPICE simulation format.
+This RFC adds those capabilities without adding a non-SPICE simulation format.
 
-## SPICE use cases
+## Use cases
 
-The typed additions map directly to
-[TPS63802 application curves](https://www.ti.com/lit/ds/symlink/tps63802.pdf):
-
-| Figures | Graph | Required addition |
-| --- | --- | --- |
-| 10-2 | Output current capability versus input voltage | Multiple parameter sweeps |
-| 10-3 and 10-4 | Switching frequency | TypeScript measurement |
-| 10-5 through 10-10 | Efficiency | Multiple parameter sweeps and TypeScript measurement |
-| 10-11 through 10-14 | Line and load regulation | Parameter sweep and TypeScript measurement |
-| 10-15 through 10-20 | Switching waveforms | Existing transient analysis |
-| 10-21 through 10-26 | Load transient | Current-source waveform |
-| 10-27 through 10-29 | Line transient | Voltage-source waveform |
-| 10-30 and 10-31 | Rising enable | Existing voltage-source pulse |
-
-Existing transient support already reproduces
-[Figures 10-15](https://github.com/tscircuit/ti/blob/de6f200/lib/simulations/TPS63802-Figure-10-15-switching-waveforms-pfm-boost-operation.circuit.tsx),
-[10-16](https://github.com/tscircuit/ti/blob/de6f200/lib/simulations/TPS63802-Figure-10-16-switching-waveforms-pfm-buck-boost-operation.circuit.tsx),
-and
-[10-17](https://github.com/tscircuit/ti/blob/de6f200/lib/simulations/TPS63802-Figure-10-17-switching-waveforms-pfm-buck-operation.circuit.tsx).
+| Use case | Required addition |
+| --- | --- |
+| Run a vendor or user-authored SPICE test bench | Complete SPICE netlist |
+| Apply an arbitrary time-domain voltage or current stimulus | Piecewise-linear source waveform |
+| Evaluate a circuit across more than one component or source value | Multiple parameter sweeps |
+| Calculate efficiency, regulation, frequency, or another scalar | TypeScript measurement |
 
 For analyses without a typed tscircuit element, `<analog.spicesimulation>`
 runs a complete netlist. This covers the analyses and output statements
 documented by the
-[ngspice manual](https://ngspice.sourceforge.io/docs/ngspice-manual.pdf) and
-vendor decks from
-[PSpice for TI](https://www.ti.com/tool/PSPICE-FOR-TI), when the selected
-engine supports their syntax and models.
+[ngspice manual](https://ngspice.sourceforge.io/docs/ngspice-manual.pdf), plus
+vendor decks when the selected engine supports their syntax and models.
 
 ## Usage at a glance
 
@@ -89,10 +71,10 @@ typed TSX element for every engine analysis:
 ```tsx
 export default () => (
   <analog.spicesimulation
-    name="tps63802-vendor-testbench"
+    name="vendor-testbench"
     spiceEngine="pspice"
     source={vendorTestbenchSource}
-    includes={{ "TPS63802_TRANS.lib": vendorModelSource }}
+    includes={{ "device-model.lib": vendorModelSource }}
   />
 )
 ```
@@ -333,9 +315,9 @@ existing resistance, capacitance, inductance, voltage, and current variants.
 </analog.transientsimulation>
 ```
 
-Figure 10-2 can select the highest load-current coordinate whose settled output
-remains in regulation. That selection is ordinary result processing, not a
-separate simulation element.
+Selecting a limit such as the highest load-current coordinate whose settled
+output remains in regulation is ordinary result processing, not a separate
+simulation element.
 
 ## Measurements
 
@@ -405,11 +387,11 @@ statements:
 {
   "type": "simulation_experiment",
   "simulation_experiment_id": "simulation_experiment_vendor_testbench",
-  "name": "tps63802-vendor-testbench",
+  "name": "vendor-testbench",
   "experiment_type": "spice_netlist",
-  "spice_source": "TPS63802 vendor testbench\n.include TPS63802_TRANS.lib\n.tran 1us 5ms\n.end",
+  "spice_source": "Vendor testbench\n.include device-model.lib\n.tran 1us 5ms\n.end",
   "spice_include_sources": {
-    "TPS63802_TRANS.lib": "TPS63802 vendor model source"
+    "device-model.lib": "Vendor model source"
   }
 }
 ```
