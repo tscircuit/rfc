@@ -1,14 +1,21 @@
-# Analog Simulation Analyses and Parameter Sweeps
+# SPICE Simulation Analyses, Stimulus, and Measurements
 
 ## Motivation
 
-tscircuit currently exposes transient simulation through
-`<analogsimulation />`. Circuit authors also need DC operating point, direct
-DC sweep, AC sweep, and repeated simulations across component values.
+tscircuit exposes SPICE transient, DC operating-point, DC sweep, AC sweep, and
+one-dimensional parameter sweeps. General SPICE workflows also require
+arbitrary source waveforms, more than one parameter sweep, and scalar
+calculations.
 
-This RFC defines how those simulations are written in TSX and the Circuit JSON
-they produce. Compiler, engine, scheduling, rendering, and export APIs are
-outside its scope.
+This RFC adds those capabilities without adding a non-SPICE simulation format.
+
+## Use cases
+
+| Use case | Required addition |
+| --- | --- |
+| Apply an arbitrary time-domain voltage or current stimulus | Piecewise-linear source waveform |
+| Evaluate a circuit across more than one component or source value | Multiple parameter sweeps |
+| Calculate efficiency, regulation, frequency, or another scalar | TypeScript measurement |
 
 ## Usage at a glance
 
@@ -46,8 +53,8 @@ export default () => (
 )
 ```
 
-All four elements accept `name`, `spiceEngine`, and `spiceOptions`. Their
-analysis-specific props are described below.
+The four typed elements reuse the existing `name`, `spiceEngine`, and
+`spiceOptions` props. Their analysis-specific props are described below.
 
 ## Transient simulation
 
@@ -147,6 +154,42 @@ real and imaginary values; magnitude and phase are views of those values.
 DC bias, transient waveform props, and `acMagnitude`/`acPhase` may coexist on
 the same source. They apply only to their corresponding analysis.
 
+## Stimulus waveforms
+
+`voltageWaveform` and `currentWaveform` define SPICE piecewise-linear sources.
+Each point has a time and a voltage or current. Points are applied in order and
+linearly interpolated.
+
+```tsx
+<currentsource
+  name="ILOAD"
+  currentWaveform={[
+    { time: "0ms", current: "100mA" },
+    { time: "1ms", current: "100mA" },
+    { time: "1.001ms", current: "1A" },
+    { time: "2ms", current: "1A" },
+    { time: "2.001ms", current: "100mA" },
+  ]}
+/>
+```
+
+```tsx
+<voltagesource
+  name="VIN"
+  voltageWaveform={[
+    { time: "0ms", voltage: "2.2V" },
+    { time: "1ms", voltage: "2.2V" },
+    { time: "1.001ms", voltage: "4.2V" },
+    { time: "2ms", voltage: "4.2V" },
+    { time: "2.001ms", voltage: "2.2V" },
+  ]}
+/>
+```
+
+Raw times use milliseconds, raw voltages use volts, and raw currents use
+amperes. Times must be nonnegative and strictly increasing. A source cannot use
+a piecewise-linear waveform and a periodic `waveShape` at the same time.
+
 ## Component parameter sweeps
 
 A nested `<analog.sweepparameter>` repeats its parent simulation with a
@@ -206,9 +249,91 @@ use `start`, `stop`, and `step`:
 />
 ```
 
-Exactly one sweep parameter is allowed per simulation in this RFC. Each value
-produces the same result type as the parent simulation, linked to its sweep
-point. Scalar reductions and multidimensional sweeps are separate proposals.
+## Multiple parameter sweeps
+
+More than one `<analog.sweepparameter>` may be nested in a simulation. The
+simulation runs the Cartesian product in child order. This only extends the
+existing resistance, capacitance, inductance, voltage, and current variants.
+
+```tsx
+<analog.transientsimulation
+  name="output-current-capability"
+  duration="5ms"
+  timePerStep="1us"
+>
+  <analog.sweepparameter
+    name="input-voltage"
+    parameterType="voltage"
+    net="VIN"
+    values={["1.8V", "2.5V", "3.3V", "4.2V", "5.5V"]}
+  />
+  <analog.sweepparameter
+    name="load-current"
+    parameterType="current"
+    currentSourceRef=".ILOAD"
+    start="0A"
+    stop="3A"
+    step="25mA"
+  />
+</analog.transientsimulation>
+```
+
+Selecting a limit such as the highest load-current coordinate whose settled
+output remains in regulation is ordinary result processing, not a separate
+simulation element.
+
+## Measurements
+
+`<analog.measurement>` is nested directly in
+`<analog.transientsimulation>`. Its TypeScript function runs once for each
+parameter-sweep coordinate and returns one scalar:
+
+```tsx
+const mean = (samples: readonly number[]) =>
+  samples.reduce((sum, sample) => sum + sample, 0) / samples.length
+
+export default () => (
+  <analog.transientsimulation duration="10ms" timePerStep="1us">
+    <analog.measurement
+      name="settled-output-voltage"
+      unit="V"
+      measureFn={({ getVoltage }) =>
+        mean(getVoltage("net.VOUT").values.slice(-1000))}
+    />
+  </analog.transientsimulation>
+)
+```
+
+The callback interface is:
+
+```tsx
+interface TransientMeasurementSeries {
+  timestampsMs: readonly number[]
+  values: readonly number[]
+}
+
+interface AnalogTransientMeasurementContext {
+  getVoltage: (selector: string) => TransientMeasurementSeries
+  getCurrent: (selector: string) => TransientMeasurementSeries
+}
+
+interface AnalogMeasurementProps {
+  name: string
+  unit: string
+  measureFn: (context: AnalogTransientMeasurementContext) => number
+}
+```
+
+`getVoltage` and `getCurrent` accept standard tscircuit selectors resolved
+within the parent simulation's group or subcircuit. They read the current sweep
+coordinate's transient result and never return Circuit JSON. They throw when
+the selector is missing or cannot provide the requested quantity. Both arrays
+have the same length.
+
+The measurement function returns a finite number in the declared `unit`. Its
+TypeScript source is not serialized into Circuit JSON. Frequency, efficiency,
+and regulation calculations therefore use normal TypeScript instead of a new
+expression language.
 
 ## Circuit JSON
 
@@ -286,6 +411,27 @@ shape. The frequency and complex-value arrays always have the same length. DC
 sweep graphs use `sweep_values`, `sweep_unit`, and either `voltage_levels` or
 `current_levels`.
 
+### Source waveforms
+
+Waveform points remain on the existing source elements. Circuit JSON stores
+them as aligned arrays so long waveforms do not repeat field names for every
+sample:
+
+```json
+{
+  "type": "simulation_current_source",
+  "simulation_current_source_id": "simulation_current_source_iload",
+  "current_waveform": {
+    "timestamps_ms": [0, 1, 1.001],
+    "current_values": [0.1, 0.1, 1]
+  }
+}
+```
+
+`simulation_voltage_source` uses `voltage_waveform` with `timestamps_ms` and
+`voltage_values`. Each timestamp array has the same length as its corresponding
+value array.
+
 ### Parameter sweep relationships
 
 `<analog.sweepparameter>` emits a `simulation_parameter_sweep`. Its target ID
@@ -305,23 +451,97 @@ is specific to `parameter_type`; this resistance example uses
 }
 ```
 
-Each coordinate emits one point:
+Each analysis result currently carries one
+`simulation_parameter_sweep_coordinate`:
 
 ```json
 {
-  "type": "simulation_parameter_sweep_point",
-  "simulation_parameter_sweep_point_id": "simulation_parameter_sweep_point_2",
-  "simulation_parameter_sweep_id": "simulation_parameter_sweep_load",
-  "sweep_index": 1,
-  "parameter_value": 330,
-  "parameter_unit": "Ω"
+  "simulation_parameter_sweep_coordinate": {
+    "simulation_parameter_sweep_id": "simulation_parameter_sweep_load",
+    "sweep_index": 1,
+    "parameter_value": 330,
+    "parameter_unit": "Ω"
+  }
 }
 ```
 
-The analysis-specific result for that run includes
-`simulation_parameter_sweep_point_id`. A transient resistance sweep therefore
-produces transient graph elements, while an AC resistance sweep produces AC
-sweep graph elements. The two are not forced into one generic result shape.
+A transient resistance sweep produces transient graph elements, while an AC
+resistance sweep produces AC sweep graph elements. The two are not forced into
+one generic result shape.
+
+### Multidimensional sweep relationships
+
+Every `<analog.sweepparameter>` emits the existing
+`simulation_parameter_sweep`. Results from multiple sweeps use an ordered
+`simulation_parameter_sweep_coordinates` array:
+
+```json
+{
+  "simulation_parameter_sweep_coordinates": [
+    {
+      "simulation_parameter_sweep_id": "simulation_parameter_sweep_vin",
+      "sweep_index": 2,
+      "parameter_value": 3.3,
+      "parameter_unit": "V"
+    },
+    {
+      "simulation_parameter_sweep_id": "simulation_parameter_sweep_load",
+      "sweep_index": 40,
+      "parameter_value": 1,
+      "parameter_unit": "A"
+    }
+  ]
+}
+```
+
+One-dimensional results keep the singular field for compatibility.
+
+### Measurement results
+
+`<analog.measurement>` emits one `simulation_measurement_result`. Its value
+array follows the Cartesian-product order defined by the sweep children:
+
+```json
+{
+  "type": "simulation_measurement_result",
+  "simulation_measurement_result_id": "simulation_measurement_result_vout",
+  "simulation_experiment_id": "simulation_experiment_load_response",
+  "name": "settled-output-voltage",
+  "measurement_values": [3.301, 3.299, 3.298],
+  "measurement_unit": "V",
+  "simulation_parameter_sweep_coordinate_sets": [
+    [
+      {
+        "simulation_parameter_sweep_id": "simulation_parameter_sweep_load",
+        "sweep_index": 0,
+        "parameter_value": 100,
+        "parameter_unit": "Ω"
+      }
+    ],
+    [
+      {
+        "simulation_parameter_sweep_id": "simulation_parameter_sweep_load",
+        "sweep_index": 1,
+        "parameter_value": 330,
+        "parameter_unit": "Ω"
+      }
+    ],
+    [
+      {
+        "simulation_parameter_sweep_id": "simulation_parameter_sweep_load",
+        "sweep_index": 2,
+        "parameter_value": 1000,
+        "parameter_unit": "Ω"
+      }
+    ]
+  ]
+}
+```
+
+`measurement_values` and `simulation_parameter_sweep_coordinate_sets` have the
+same length. Each coordinate set contains one coordinate per sweep, in child
+order. With no parameter sweep, `measurement_values` contains one value and
+the coordinate sets are omitted. The result contains no serialized function.
 
 ## Compatibility
 
@@ -336,17 +556,20 @@ It continues to mean transient analysis and emits the existing
 `simulation_transient_current_graph` elements.
 
 New code should use `<analog.transientsimulation>`. The other
-`<analog.*simulation>` elements have no legacy spelling.
+`<analog.*simulation>` elements have no legacy spelling. Existing
+one-dimensional sweep coordinates remain readable.
 
 ## Scope
 
 This RFC specifies:
 
 - TSX usage for transient, DC operating point, direct DC sweep, and AC sweep;
-- TSX usage for a one-dimensional component parameter sweep; and
-- the Circuit JSON experiments, sweep relationships, and analysis-specific
-  results produced by that usage.
+- piecewise-linear voltage and current sources;
+- one or more existing parameter sweeps on one SPICE simulation;
+- TypeScript scalar measurements for transient simulations; and
+- the corresponding Circuit JSON experiments, relationships, and results.
 
-Measurement expressions, scalar reductions, multidimensional sweeps, engine
-interfaces, execution scheduling, rendering behavior, export formats, and
-package implementation order are intentionally left to separate proposals.
+Engine interfaces, execution scheduling, rendering behavior, export formats,
+new typed analysis elements, non-SPICE model formats, and package implementation
+order are outside this RFC. Raw SPICE source is not accepted; tscircuit
+continues to derive SPICE from TSX and Circuit JSON.
