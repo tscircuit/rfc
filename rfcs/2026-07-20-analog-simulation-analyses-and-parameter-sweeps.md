@@ -297,39 +297,24 @@ export default () => (
     <analog.measurement
       name="settled-output-voltage"
       unit="V"
-      measureFn={({ select, getVoltage }) => {
-        const output = select("net.VOUT")
-        if (!output) throw new Error("VOUT was not found")
-        return mean(getVoltage(output).values.slice(-1000))
-      }}
+      measureFn={({ getVoltage }) =>
+        mean(getVoltage("net.VOUT").values.slice(-1000))}
     />
   </analog.transientsimulation>
 )
 ```
 
-The callback uses the existing public selector types from `@tscircuit/props`:
+The callback interface is:
 
 ```tsx
-import type {
-  CustomDrcSelect,
-  SelectionResultComponent,
-  SelectionResultNet,
-  SelectionResultPort,
-} from "@tscircuit/props"
-
 interface TransientMeasurementSeries {
   timestampsMs: readonly number[]
   values: readonly number[]
 }
 
 interface AnalogTransientMeasurementContext {
-  select: CustomDrcSelect
-  getVoltage: (
-    target: SelectionResultNet | SelectionResultPort,
-  ) => TransientMeasurementSeries
-  getCurrent: (
-    target: SelectionResultComponent | SelectionResultPort,
-  ) => TransientMeasurementSeries
+  getVoltage: (selector: string) => TransientMeasurementSeries
+  getCurrent: (selector: string) => TransientMeasurementSeries
 }
 
 interface AnalogMeasurementProps {
@@ -339,12 +324,11 @@ interface AnalogMeasurementProps {
 }
 ```
 
-`select` has the same behavior as `CustomDrcSelect` and resolves within the
-parent simulation's group or subcircuit. It returns public selection wrappers
-and never returns Circuit JSON. `getVoltage` and `getCurrent` read the current
-sweep coordinate's transient result for the selected target. They throw when
-the selected target cannot provide the requested quantity. Both arrays have
-the same length.
+`getVoltage` and `getCurrent` accept standard tscircuit selectors resolved
+within the parent simulation's group or subcircuit. They read the current sweep
+coordinate's transient result and never return Circuit JSON. They throw when
+the selector is missing or cannot provide the requested quantity. Both arrays
+have the same length.
 
 The measurement function returns a finite number in the declared `unit`. Its
 TypeScript source is not serialized into Circuit JSON. Frequency, efficiency,
@@ -429,22 +413,24 @@ sweep graphs use `sweep_values`, `sweep_unit`, and either `voltage_levels` or
 
 ### Source waveforms
 
-Waveform points remain on the existing source elements:
+Waveform points remain on the existing source elements. Circuit JSON stores
+them as aligned arrays so long waveforms do not repeat field names for every
+sample:
 
 ```json
 {
   "type": "simulation_current_source",
   "simulation_current_source_id": "simulation_current_source_iload",
-  "current_waveform": [
-    { "time_ms": 0, "current": 0.1 },
-    { "time_ms": 1, "current": 0.1 },
-    { "time_ms": 1.001, "current": 1 }
-  ]
+  "current_waveform": {
+    "timestamps_ms": [0, 1, 1.001],
+    "current_values": [0.1, 0.1, 1]
+  }
 }
 ```
 
-`simulation_voltage_source` uses `voltage_waveform` with `time_ms` and
-`voltage`.
+`simulation_voltage_source` uses `voltage_waveform` with `timestamps_ms` and
+`voltage_values`. Each timestamp array has the same length as its corresponding
+value array.
 
 ### Parameter sweep relationships
 
