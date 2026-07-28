@@ -4,8 +4,8 @@
 
 tscircuit exposes SPICE transient, DC operating-point, DC sweep, AC sweep, and
 one-dimensional parameter sweeps. General SPICE workflows also require
-arbitrary source waveforms, more than one parameter sweep, scalar calculations,
-and complete netlists that use analyses without typed tscircuit elements.
+arbitrary source waveforms, more than one parameter sweep, and scalar
+calculations.
 
 This RFC adds those capabilities without adding a non-SPICE simulation format.
 
@@ -13,16 +13,9 @@ This RFC adds those capabilities without adding a non-SPICE simulation format.
 
 | Use case | Required addition |
 | --- | --- |
-| Run a vendor or user-authored SPICE test bench | Complete SPICE netlist |
 | Apply an arbitrary time-domain voltage or current stimulus | Piecewise-linear source waveform |
 | Evaluate a circuit across more than one component or source value | Multiple parameter sweeps |
 | Calculate efficiency, regulation, frequency, or another scalar | TypeScript measurement |
-
-For analyses without a typed tscircuit element, `<analog.spicesimulation>`
-runs a complete netlist. This covers the analyses and output statements
-documented by the
-[ngspice manual](https://ngspice.sourceforge.io/docs/ngspice-manual.pdf), plus
-vendor decks when the selected engine supports their syntax and models.
 
 ## Usage at a glance
 
@@ -60,38 +53,8 @@ export default () => (
 )
 ```
 
-The four typed elements accept `name`, `spiceEngine`, and `spiceOptions`.
-Their analysis-specific props are described below.
-
-## Complete SPICE netlists
-
-`<analog.spicesimulation>` runs a complete SPICE netlist without requiring a
-typed TSX element for every engine analysis:
-
-```tsx
-export default () => (
-  <analog.spicesimulation
-    name="vendor-testbench"
-    spiceEngine="pspice"
-    source={vendorTestbenchSource}
-    includes={{ "device-model.lib": vendorModelSource }}
-  />
-)
-```
-
-`source` contains the complete netlist, including its analysis and output
-statements. `includes` maps relative `.include` paths to their source text.
-Paths are matched exactly and cannot be absolute or contain `..`.
-
-The selected engine determines the accepted SPICE dialect. The element stores
-the source and model parameters unchanged; any compatibility translation is
-explicit behavior of the selected engine adapter. A PSpice deck therefore
-requires a PSpice-compatible engine. Selecting ngspice does not imply PSpice
-compatibility.
-
-A new backend-supported SPICE statement does not require another TSX element.
-A first-class tscircuit feature for its result still requires an
-analysis-specific Circuit JSON type.
+The four typed elements reuse the existing `name`, `spiceEngine`, and
+`spiceOptions` props. Their analysis-specific props are described below.
 
 ## Transient simulation
 
@@ -321,36 +284,72 @@ simulation element.
 
 ## Measurements
 
-`<analog.measurement>` runs a TypeScript function after each simulation and
-produces one scalar:
+`<analog.measurement>` is nested directly in
+`<analog.transientsimulation>`. Its TypeScript function runs once for each
+parameter-sweep coordinate and returns one scalar:
 
 ```tsx
-const mean = (samples: number[]) =>
+const mean = (samples: readonly number[]) =>
   samples.reduce((sum, sample) => sum + sample, 0) / samples.length
 
 export default () => (
-  <analog.measurement
-    name="settled-output-voltage"
-    unit="V"
-    measureFn={({ selectOne }) => {
-      const output = selectOne(".VOUT")
-      if (output.type !== "simulation_transient_voltage_graph") {
-        throw new Error("VOUT must resolve to a transient voltage graph")
-      }
-      return mean(output.voltage_levels.slice(-1000))
-    }}
-  />
+  <analog.transientsimulation duration="10ms" timePerStep="1us">
+    <analog.measurement
+      name="settled-output-voltage"
+      unit="V"
+      measureFn={({ select, getVoltage }) => {
+        const output = select("net.VOUT")
+        if (!output) throw new Error("VOUT was not found")
+        return mean(getVoltage(output).values.slice(-1000))
+      }}
+    />
+  </analog.transientsimulation>
 )
 ```
 
-`selectOne` accepts a tscircuit selector and returns one analysis-specific
-Circuit JSON result. The function returns a finite number in the declared
-`unit`. It runs once per parameter-sweep coordinate after the raw results for
-that coordinate are available.
+The callback uses the existing public selector types from `@tscircuit/props`:
 
-The function is TypeScript source and is not serialized into Circuit JSON.
-Only its result is emitted. Frequency, efficiency, and regulation calculations
-therefore use normal TypeScript instead of a new expression language.
+```tsx
+import type {
+  CustomDrcSelect,
+  SelectionResultComponent,
+  SelectionResultNet,
+  SelectionResultPort,
+} from "@tscircuit/props"
+
+interface TransientMeasurementSeries {
+  timestampsMs: readonly number[]
+  values: readonly number[]
+}
+
+interface AnalogTransientMeasurementContext {
+  select: CustomDrcSelect
+  getVoltage: (
+    target: SelectionResultNet | SelectionResultPort,
+  ) => TransientMeasurementSeries
+  getCurrent: (
+    target: SelectionResultComponent | SelectionResultPort,
+  ) => TransientMeasurementSeries
+}
+
+interface AnalogMeasurementProps {
+  name: string
+  unit: string
+  measureFn: (context: AnalogTransientMeasurementContext) => number
+}
+```
+
+`select` has the same behavior as `CustomDrcSelect` and resolves within the
+parent simulation's group or subcircuit. It returns public selection wrappers
+and never returns Circuit JSON. `getVoltage` and `getCurrent` read the current
+sweep coordinate's transient result for the selected target. They throw when
+the selected target cannot provide the requested quantity. Both arrays have
+the same length.
+
+The measurement function returns a finite number in the declared `unit`. Its
+TypeScript source is not serialized into Circuit JSON. Frequency, efficiency,
+and regulation calculations therefore use normal TypeScript instead of a new
+expression language.
 
 ## Circuit JSON
 
@@ -363,7 +362,6 @@ Each TSX simulation emits a `simulation_experiment`. The existing
 | `analog.dcoperatingpointsimulation` | `spice_dc_operating_point` |
 | `analog.dcsweepsimulation` | `spice_dc_sweep` |
 | `analog.acsweepsimulation` | `spice_ac_analysis` |
-| `analog.spicesimulation` | `spice_netlist` |
 
 Analysis props are stored directly on the experiment. For example:
 
@@ -377,22 +375,6 @@ Analysis props are stored directly on the experiment. For example:
   "ac_samples_per_interval": 20,
   "ac_start_frequency_hz": 10,
   "ac_stop_frequency_hz": 1000000
-}
-```
-
-The complete-netlist form stores the source without interpreting its analysis
-statements:
-
-```json
-{
-  "type": "simulation_experiment",
-  "simulation_experiment_id": "simulation_experiment_vendor_testbench",
-  "name": "vendor-testbench",
-  "experiment_type": "spice_netlist",
-  "spice_source": "Vendor testbench\n.include device-model.lib\n.tran 1us 5ms\n.end",
-  "spice_include_sources": {
-    "device-model.lib": "Vendor model source"
-  }
 }
 ```
 
@@ -444,51 +426,6 @@ The current form uses `complex_currents` with the same `{ "re", "im" }`
 shape. The frequency and complex-value arrays always have the same length. DC
 sweep graphs use `sweep_values`, `sweep_unit`, and either `voltage_levels` or
 `current_levels`.
-
-### Complete-netlist results
-
-An engine adapter emits an analysis-specific Circuit JSON result when one
-exists. Other complete-netlist output is preserved as SPICE plots containing
-real or complex vectors:
-
-```json
-[
-  {
-    "type": "simulation_spice_plot",
-    "simulation_spice_plot_id": "simulation_spice_plot_ac1",
-    "simulation_experiment_id": "simulation_experiment_vendor_testbench",
-    "name": "AC Analysis"
-  },
-  {
-    "type": "simulation_spice_real_vector",
-    "simulation_spice_real_vector_id": "simulation_spice_real_vector_frequency",
-    "simulation_spice_plot_id": "simulation_spice_plot_ac1",
-    "name": "frequency",
-    "vector_unit": "Hz",
-    "real_values": [10, 100, 1000],
-    "is_scale": true
-  },
-  {
-    "type": "simulation_spice_complex_vector",
-    "simulation_spice_complex_vector_id": "simulation_spice_complex_vector_vout",
-    "simulation_spice_plot_id": "simulation_spice_plot_ac1",
-    "name": "v(out)",
-    "vector_unit": "V",
-    "complex_values": [
-      { "re": 0.99, "im": -0.01 },
-      { "re": 0.95, "im": -0.08 },
-      { "re": 0.71, "im": -0.71 }
-    ]
-  }
-]
-```
-
-Each plot has at most one vector with `is_scale: true`. Native `.measure`
-scalars use `simulation_measurement_result`.
-
-These elements preserve backend output; they are not generic graph elements.
-Typed transient, DC, AC, noise, or other results remain separate whenever
-tscircuit needs analysis-specific behavior.
 
 ### Source waveforms
 
@@ -575,29 +512,50 @@ One-dimensional results keep the singular field for compatibility.
 
 ### Measurement results
 
-`<analog.measurement>` emits one `simulation_measurement_result` for each
-coordinate:
+`<analog.measurement>` emits one `simulation_measurement_result`. Its value
+array follows the Cartesian-product order defined by the sweep children:
 
 ```json
 {
   "type": "simulation_measurement_result",
-  "simulation_measurement_result_id": "simulation_measurement_result_vout_2",
+  "simulation_measurement_result_id": "simulation_measurement_result_vout",
   "simulation_experiment_id": "simulation_experiment_load_response",
   "name": "settled-output-voltage",
-  "measurement": 3.298,
+  "measurement_values": [3.301, 3.299, 3.298],
   "measurement_unit": "V",
-  "simulation_parameter_sweep_coordinates": [
-    {
-      "simulation_parameter_sweep_id": "simulation_parameter_sweep_load",
-      "sweep_index": 1,
-      "parameter_value": 330,
-      "parameter_unit": "Ω"
-    }
+  "simulation_parameter_sweep_coordinate_sets": [
+    [
+      {
+        "simulation_parameter_sweep_id": "simulation_parameter_sweep_load",
+        "sweep_index": 0,
+        "parameter_value": 100,
+        "parameter_unit": "Ω"
+      }
+    ],
+    [
+      {
+        "simulation_parameter_sweep_id": "simulation_parameter_sweep_load",
+        "sweep_index": 1,
+        "parameter_value": 330,
+        "parameter_unit": "Ω"
+      }
+    ],
+    [
+      {
+        "simulation_parameter_sweep_id": "simulation_parameter_sweep_load",
+        "sweep_index": 2,
+        "parameter_value": 1000,
+        "parameter_unit": "Ω"
+      }
+    ]
   ]
 }
 ```
 
-The result contains no serialized function.
+`measurement_values` and `simulation_parameter_sweep_coordinate_sets` have the
+same length. Each coordinate set contains one coordinate per sweep, in child
+order. With no parameter sweep, `measurement_values` contains one value and
+the coordinate sets are omitted. The result contains no serialized function.
 
 ## Compatibility
 
@@ -619,15 +577,13 @@ one-dimensional sweep coordinates remain readable.
 
 This RFC specifies:
 
-- complete SPICE netlists and their include sources;
-- raw SPICE plot, real-vector, and complex-vector results;
+- TSX usage for transient, DC operating point, direct DC sweep, and AC sweep;
 - piecewise-linear voltage and current sources;
-- multiple existing parameter sweeps on one SPICE simulation;
-- TypeScript scalar measurements; and
-- the corresponding Circuit JSON fields and measurement results.
+- one or more existing parameter sweeps on one SPICE simulation;
+- TypeScript scalar measurements for transient simulations; and
+- the corresponding Circuit JSON experiments, relationships, and results.
 
 Engine interfaces, execution scheduling, rendering behavior, export formats,
 new typed analysis elements, non-SPICE model formats, and package implementation
-order are outside this RFC. A selected engine may support additional SPICE
-analyses, model syntax, Monte Carlo, or worst-case commands through the
-complete-netlist form.
+order are outside this RFC. Raw SPICE source is not accepted; tscircuit
+continues to derive SPICE from TSX and Circuit JSON.
