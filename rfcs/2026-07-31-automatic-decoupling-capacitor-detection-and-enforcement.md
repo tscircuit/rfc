@@ -1,8 +1,12 @@
 # Automatic Decoupling Capacitor Detection and Enforcement
 
 Capacitors are automatically considered decoupling capacitors when connected
-between a chip power pin and ground. Incorrect detections can be overridden
-with `isNotDecouplingCapacitor`.
+between a chip pin that requires power and ground. This behavior can be
+overridden for a pin with `shouldHaveDecouplingCapacitor` in `pinAttributes`.
+
+When `shouldHaveDecouplingCapacitor` is not specified, it defaults to the pin's
+effective `requiresPower` value, including attributes inferred from common pin
+labels such as `VCC`.
 
 ## Good case: Automatically detected as decoupling
 
@@ -31,10 +35,10 @@ export default () => (
 )
 ```
 
-Because C1 is connected between a chip power pin and ground, it is
-automatically treated as a decoupling capacitor.
+Because C1 is connected between a chip power pin (implicitly `requiresPower`)
+and ground, it is automatically treated as a decoupling capacitor.
 
-## Bad detection: Explicitly opt out
+## Edge case: Explicitly opt out
 
 ```tsx
 export default () => (
@@ -43,27 +47,33 @@ export default () => (
       name="U1"
       footprint="soic8"
       pinLabels={{
-        1: "RESET",
+        1: "VBAT",
         4: "GND",
+      }}
+      pinAttributes={{
+        VBAT: {
+          requiresPower: true,
+          shouldHaveDecouplingCapacitor: false,
+        },
       }}
     />
 
     <capacitor
       name="C1"
-      capacitance="1uF"
-      footprint="0402"
-      isNotDecouplingCapacitor
+      capacitance="100uF"
+      footprint="1210"
     />
 
-    <trace from=".U1 > .RESET" to=".C1 > .1" />
+    <trace from=".U1 > .VBAT" to=".C1 > .1" />
     <trace from=".C1 > .2" to="net.GND" />
     <trace from=".U1 > .GND" to="net.GND" />
   </board>
 )
 ```
 
-Here, C1 is a reset-delay capacitor rather than a decoupling capacitor, so the
-user disables the automatic classification.
+Here, C1 is a hold-up capacitor for the backup supply rather than a decoupling
+capacitor. Although `VBAT` requires power, the user disables automatic
+classification for that pin.
 
 ## Motivation
 
