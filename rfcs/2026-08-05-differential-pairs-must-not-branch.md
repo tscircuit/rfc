@@ -38,17 +38,6 @@ Differential routing assumes two unambiguous endpoints per conductor. Rejecting
 branches early prevents invalid autorouter input and gives users a clear,
 actionable diagnostic.
 
-## Checks API
-
-```ts
-checkDifferentialPairTracesArePointToPoint(circuitJson, pairs)
-  => SourceDifferentialPairNotPointToPointError[]
-```
-
-`pairs` contains the resolved positive and negative `source_trace_id` values.
-The check returns one error per branched conductor and is called by core after
-resolving differential-pair trace names or pin selectors.
-
 ## Error message
 
 The diagnostic should identify the pair, ambiguous net, and all terminal pins,
