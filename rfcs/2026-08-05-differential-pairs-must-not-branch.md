@@ -1,4 +1,4 @@
-# Differential Pair Traces Must Not Branch
+# Differential Pair Traces Must Be Point-to-Point
 
 A trace selected by `<differentialpair>` must be point-to-point. Its complete
 source-connectivity group must have exactly two terminal source ports. Vias and
@@ -41,8 +41,8 @@ actionable diagnostic.
 ## Checks API
 
 ```ts
-checkDifferentialPairsHaveNoBranches(circuitJson, pairs)
-  => SourceDifferentialPairBranchError[]
+checkDifferentialPairTracesArePointToPoint(circuitJson, pairs)
+  => SourceDifferentialPairNotPointToPointError[]
 ```
 
 `pairs` contains the resolved positive and negative `source_trace_id` values.
@@ -51,12 +51,12 @@ resolving differential-pair trace names or pin selectors.
 
 ## Error message
 
-The diagnostic should identify the pair, polarity, ambiguous net, and all
-terminal pins, then recommend a pin selector:
+The diagnostic should identify the pair, ambiguous net, and all terminal pins,
+then recommend a pin selector:
 
 ```text
-Differential pair "USB_DATA" has an ambiguous positive connection on net.DP.
-net.DP connects to 3 pins: .J1 > .DP, .U1 > .DP, and .TP1 > .pin1.
-Differential-pair traces must be strictly point-to-point. Remove the branch and
-prefer a pin selector such as positiveConnection=".J1 > .DP".
+Differential pair "USB_DATA" positiveConnection resolves to net.DP, which is
+not point-to-point. It connects to 3 pins: .J1 > .DP, .U1 > .DP, and
+.TP1 > .pin1. Remove the extra connection and prefer a pin selector such as
+positiveConnection=".J1 > .DP".
 ```
