@@ -228,6 +228,23 @@ far-side projections still contribute to enclosure sizing and standoff
 clearance. Invalid dimensions and unresolved required geometry continue to
 surface as rendering errors.
 
+Until that DRC exists, generated enclosure features are **not** checked against
+anything inside the enclosure. Known consequences of the current geometry-only
+implementation:
+
+- the friction-fit lid lip is clamped only to the base cavity, so a
+  `lidLipDepth` greater than the available `topHeadroom` will intersect the PCB
+  and any component near the board edge without an error or warning;
+- printed features are not checked against component bodies, only against the
+  shell they belong to; and
+- an aperture is validated against its own wall, not against the part that is
+  supposed to reach it.
+
+These are clearance rules, not geometry bugs. They belong to the deferred
+enclosure/assembly DRC pass and must not be patched piecemeal into individual
+geometry stages: checking the lip against the PCB alone would still miss
+components, connectors, and hardware.
+
 ### Current reference coverage
 
 The prefab-board reference example exercises:
@@ -268,7 +285,14 @@ The merged `@tscircuit/props` contract supports:
 | `circle` | `radius` |
 
 Every branch may carry `margin` and `zExtentAboveBoard`.
-`zExtentAboveBoard` is the aperture center height above the PCB top surface.
+`zExtentAboveBoard` is the aperture center offset from the component's own
+mounting surface, measured outward from the board: up from the board top for a
+top-mounted part, down from the board bottom for a bottom-mounted one. The same
+authored value is therefore correct on either side, because it describes the
+part rather than its placement. It may be negative, which pulls the opening back
+toward and past the board -- needed when a cable jacket is fatter than the
+connector it plugs into. The binding constraint is that the opening must not cut
+into the enclosure floor.
 Numbers use the project default unit; explicit distance strings such as
 `"3.66mm"` and `"0.1in"` may be mixed.
 
@@ -353,6 +377,13 @@ part-authored placement because a connector opening need not be centered in its
 housing.
 
 ### Non-connector placement: planned design
+
+> The placement contract this section describes is specified in
+> [`2026-07-24-enclosure-face-apertures.md`](./2026-07-24-enclosure-face-apertures.md),
+> which generalizes `{wall, offset, zExtentAboveBoard}` to a face-relative 2D
+> center so lid and floor apertures become expressible. Top/bottom apertures are
+> **not implemented**; core currently rejects `insertionDirection="from_above"`
+> with an actionable error rather than silently cutting a side wall.
 
 Other part families should feed the same aperture resolver through specialized
 inference strategies. For each center coordinate and direction, resolution
@@ -608,6 +639,42 @@ package. Projects that do not import these namespaces remain unchanged.
 Projects importing these namespaces append canonical CAD records using existing
 Circuit JSON shapes. Projects that do not import them continue producing the
 existing electronics records unchanged.
+
+### Future proposal: physical hardware occurrence records
+
+`cad_fdm_enclosure` (circuit-json #649) gives generated enclosure *parts* a typed
+CAD record that does not need PCB ownership. Generated *hardware* has no such
+record, and cannot reuse that one: a screw, heat-set insert, washer, nut, or
+standoff is not an FDM enclosure, and the relationship it needs is to the mount
+it occupies, not to the enclosure request.
+
+So the synthetic `source_component` + `pcb_component` + `cad_component` triple
+survives for hardware even after enclosure parts stop using it. That is the
+larger half of the problem: one enclosure emits two part records, while the
+prefab reference emits five M3 supports plus corner ears, i.e. roughly a dozen
+mechanical occurrences that currently present as `simple_chip` PCB components and
+flow into electrical BOM interpretations.
+
+This is explicitly **not** in scope for the initial core/create-fdm migration. It
+is collected here so the enclosure-part work does not accidentally settle it.
+
+A future proposal should cover:
+
+- a physical-occurrence record with identity, parent/child product structure, and
+  an assembled transform, independent of any PCB;
+- procurement identity (manufacturer, supplier, MPN, generic-hardware flag) and a
+  stable BOM grouping key, so mechanical items group without an MPN;
+- attachment of CAD geometry to an occurrence rather than to a `pcb_component`;
+- the relationship from an occurrence to the mount, seam, or part it is installed
+  into, which is what assembly-process planning needs;
+- consumed/consumable items that have quantity but no single placement
+  (adhesive, thread locker, labels); and
+- an explicit statement of which BOM a mechanical occurrence appears in —
+  electrical, mechanical, or both.
+
+Until then, hardware keeps the compatibility triple and must remain excluded
+from placement, obstacle, and electrical-BOM analysis by the same rules as
+enclosure parts: zero size, `do_not_place`, off-board-allowed, non-obstructing.
 
 ### Explicitly deferred decisions
 

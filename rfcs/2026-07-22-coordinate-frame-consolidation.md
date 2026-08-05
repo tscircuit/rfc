@@ -9,19 +9,29 @@ This RFC documents the coordinate frames currently used by Circuit JSON,
 the supported CAD asset formats. It also proposes a staged consolidation of
 coordinate-frame definitions and transformations.
 
-The immediate motivation is a front/back disagreement discovered while
-rendering parametric enclosure cutouts:
+The immediate motivation is a +/-Y wall disagreement discovered while rendering
+parametric enclosure cutouts (at the time this was described as a "front/back"
+disagreement, which turned out to be part of the problem - see "Canonical side
+and direction names"):
 
 - the direct `3d-viewer` path displayed physically correct cutouts after core
-  stopped swapping front and back walls;
+  stopped swapping the +Y and -Y walls;
 - the Circuit JSON to GLB to PoppyGL path displayed the same JSCAD enclosure
-  with front and back reversed relative to connector CAD models; and
+  with those walls reversed relative to connector CAD models; and
 - an attempted JSCAD-only mirror was paused because the exporter contains
   additional position, board, loader, and final-node transformations that must
   be understood as one system.
 
 No new coordinate transform should be merged until the intended global frame
 mapping is confirmed and protected by cross-representation tests.
+
+Subsequent investigation widened the scope in two ways. First, the naming itself
+was a defect and not merely a symptom: the ecosystem carried two irreconcilable
+readings of `front`, so the RFC now fixes direction names as well as frames.
+Second, a measured defect in core's layer-flip handling showed the same failure
+mode reaching outside the renderers, into geometry that had no renderer
+involvement at all. Both are recorded below, along with the authoring rules that
+follow from them.
 
 ### Initial implementation decision
 
@@ -46,11 +56,17 @@ the builder's shared mirror.
 
 The mapping is defined in
 `circuit-json-to-gltf/lib/utils/coordinate-transform.ts`
-(`CIRCUIT_Z_UP_TO_GLTF_Y_UP`) and applied by the JSCAD plan loader.
+(`CIRCUIT_Z_UP_TO_SCENE_Y_UP` - named for the Scene3D frame it actually
+produces, not the final glTF frame) and applied by the JSCAD plan loader.
 Basis-vector, positive-Circuit-Y, existing JSCAD snapshot, prefab enclosure
 per-wall PoppyGL, and a geometric connector/cutout wall-alignment regression
-(`create-fdm-enclosure/tests/prefab-board-cutout-alignment.test.ts`) cover this
-path.
+(`core/tests/enclosure/prefab-board-cutout-alignment.test.ts`) cover this path.
+
+Release ordering matters here: core's enclosure 3D snapshots are baselined
+against this fixed loader. A core checkout resolving a published
+`circuit-json-to-gltf` without it renders enclosure JSCAD geometry mirrored in
+Circuit Y, which fails the wall-alignment regression. Publish
+`circuit-json-to-gltf` before core.
 
 This does not complete the broader consolidation of board, OBJ, STL, STEP,
 GLB, camera, and placement conversions described below.
@@ -141,6 +157,76 @@ The board-level Circuit JSON frame:
 
 The world coordinate frame used by a renderer or exporter after global
 conversion.
+
+## Canonical side and direction names
+
+A frame fixes the axes; it does not fix what people *call* them. Every failure
+catalogued in this RFC began as a naming disagreement rather than a numeric one,
+so the names are part of the contract.
+
+### The six canonical directions
+
+A direction name states **where something is**, not which way it travels, and is
+always expressed in board/project space:
+
+| Axis | Name | `insertion_direction` | Cartesian spelling |
+|---|---|---|---|
+| +X | `right` | `from_right` | `from_x_pos` |
+| -X | `left` | `from_left` | `from_x_neg` |
+| +Y | `top` | `from_top` | `from_y_pos` |
+| -Y | `bottom` | `from_bottom` | `from_y_neg` |
+| +Z | `above` | `from_above` | `from_z_pos` |
+| -Z | `below` | `from_below` | `from_z_neg` |
+
+Shipped in `circuit-json` as `InsertionDirection`. Cartesian and deprecated
+spellings are accepted as **input** and normalized by
+`insertionDirectionToCanonical`; emitted Circuit JSON always uses the six
+canonical names. Cartesian values are spelled `_pos`/`_neg` rather than `+`/`-`
+because Circuit JSON enum values must be snake_case (`scripts/zod-lint.ts`).
+
+### `front` and `back` are retired
+
+They named opposite axes in different packages - `3d-viewer`'s `Front` camera
+preset is -Y, while `core`, `checks` and `circuit-json-to-gltf` treated front as
++Y - and both readings are defensible, which is why the disagreement persisted
+undetected. They are `@deprecated` in `circuit-json` and must not appear in new
+code, enum values, comments or prose.
+
+The deeper lesson is that a *viewport* word was used for a *board* quantity.
+Named directions here follow the board as drawn in the 2D PCB view; they are not
+a description of a 3D camera's point of view.
+
+### Enclosure and board faces are named Cartesian
+
+Because the collision below is worst for enclosure geometry - a face can
+plausibly be +/-Y or +/-Z - faces skip named directions entirely.
+`EnclosureFace` (`create-fdm-enclosure`) and `BoardWall` (`core`) are both:
+
+```ts
+"x_pos" | "x_neg" | "y_pos" | "y_neg" | "z_pos" | "z_neg"
+```
+
+Both sides using one vocabulary makes board-wall to enclosure-face conversion an
+identity, which is the point: there is no longer a mapping table in which a
+compensation can hide.
+
+### The layer/direction collision
+
+`top` and `bottom` name **different axes** depending on the owner:
+
+| Owner | `top` | `bottom` |
+|---|---|---|
+| direction, insertion, enclosure face | **+Y** | **-Y** |
+| **PCB layer** (`layer`, `originalLayer`) | **+Z** | **-Z** |
+
+This one is irreducible: PCB layers are named top/bottom industry-wide, and that
+naming predates and outranks anything decided here. Any symbol named `top` or
+`bottom` crossing a boundary must state which of the two it is.
+
+### Prefer the axis to the name
+
+Named directions are a convenience; the axis is the truth. Where a sentence or a
+type can carry "the +X face" instead of "the right wall", it should.
 
 ## External coordinate conventions
 
@@ -243,7 +329,7 @@ Important files:
 - `core/lib/components/primitive-components/EnclosureFdmBox_doInitialCadModelRender.ts`
   - places generated JSCAD enclosure CAD in Circuit world coordinates.
 
-Core should not contain renderer-specific front/back or axis flips.
+Core should not contain renderer-specific wall-name or axis flips.
 
 ## `@tscircuit/3d-viewer`
 
@@ -479,15 +565,15 @@ Relevant package:
 
 - `jscad-to-gltf`
 
-## Vertical-axis orientation (front-facing convention)
+## Vertical-axis orientation (default-camera convention)
 
 The two JSCAD->glTF paths agree on **up** (Circuit +Z -> glTF +Y) but disagree
 on the horizontal plane by a 180deg spin about vertical:
 
-| Path | Net Circuit -> glTF | Circuit front (-Y) lands at |
+| Path | Net Circuit -> glTF | Circuit **+Y** lands at |
 |---|---|---|
-| `jscad-to-gltf` (`jscad_y+ -> gltf_z+`) | `(x, z, -y)` | glTF **+Z** |
-| `circuit-json-to-gltf` (production) | `(-x, z, y)` | glTF **-Z** |
+| `jscad-to-gltf` (`jscad_y+ -> gltf_z+`) | `(x, z, -y)` | glTF **-Z** |
+| `circuit-json-to-gltf` (production) | `(-x, z, y)` | glTF **+Z** |
 
 This is not an alignment bug (a 180deg rotation preserves chirality and keeps
 every connector aligned with its cutout). It is a **presentation** difference,
@@ -495,13 +581,14 @@ and it matters because most glTF viewers place their default camera on **+Z**
 looking toward the origin:
 
 - `<model-viewer>` default `camera-orbit` starts near +Z.
-- A viewer that assumes "+Z is the front" will, under the production
-  `(-x, z, y)` mapping, **load facing the back** of the model.
+- A viewer whose default camera sits at +Z shows whichever circuit face the
+  active mapping sends there, which is why the mapping cannot be chosen
+  per-tool.
 
 ### Rule
 
-Any tool that renders a standalone model and expects its default camera to show
-the **front** must ensure Circuit front (-Y) maps to glTF **+Z**.
+The face a standalone preview presents to its default camera is **circuit +Y**.
+Any such tool must therefore ensure circuit +Y maps to glTF **+Z**.
 
 - **Combined board + connectors + enclosure renders** go through
   `circuit-json-to-gltf` directly and share one frame `(-x, z, y)`. Do **not**
@@ -509,31 +596,32 @@ the **front** must ensure Circuit front (-Y) maps to glTF **+Z**.
   same frame, and the whole scene's default facing is a viewer/camera concern,
   not a per-mesh one.
 - **Standalone enclosure previews** (the Cosmos `<model-viewer>` debugger and
-  the solver PNG snapshots) render the enclosure alone, so they apply a
-  180deg-about-vertical rotation to present the front to the default camera.
-  This is done via `cad_component.rotation.z = 180` fed through the production
-  pipeline, which composes to the `jscad-to-gltf` orientation `(x, z, -y)`:
+  the solver PNG snapshots) need **no rotation at all**: the production mapping
+  `(-x, z, y)` already places circuit +Y at glTF +Z. PoppyGL snapshot cameras
+  that target that wall therefore view from glTF **+Z** (positive-Z `camPos`).
 
-  ```text
-  loadJscadPlan (x, z, y)
-    -> rotate 180deg about scene-Y (-x, z, -y)
-    -> GLTFBuilder X-mirror (x, z, -y)   == jscad-to-gltf front-facing frame
-  ```
+  These previews previously applied `cad_component.rotation.z = 180`, back when
+  the presented face was circuit **-Y**. When the presented face moved to +Y the
+  rotation was not removed with it, so the debugger silently presented the
+  opposite wall - and the preview's snapshot had been rebaselined to the
+  resulting blank wall, disabling the very guard described below. Both are fixed
+  in `create-fdm-enclosure/lib/preview/create-enclosure-preview-glb.ts`
+  (`renderEnclosureJscadGlb`, now `rotation: { x: 0, y: 0, z: 0 }`).
 
-  Implemented in
-  `create-fdm-enclosure/site/create-enclosure-preview-glb.ts`
-  (`renderEnclosureJscadGlb`). Poppygl snapshot cameras that target the cutout
-  wall must therefore view from glTF **+Z** (positive-Z `camPos`), not -Z.
+  Recorded because it is exactly the pattern this RFC exists to prevent: a
+  **compensation that outlived the condition it compensated for**, kept alive by
+  a snapshot updated without being looked at.
 
 ### Invariant to protect
 
-Keep a test asserting that a known front feature renders toward glTF +Z in any
-front-facing preview, so no tool silently reverts to showing the back when it
-intends to show the front. This is currently guarded by
+Keep a test asserting that a known +Y feature renders toward glTF +Z in any
+standalone preview, so no tool silently reverts to presenting the opposite face.
+This is currently guarded by
 `create-fdm-enclosure/tests/fdm-enclosure-debugger-preview.test.ts`: it renders
 the standalone enclosure preview from a **+Z** camera and snapshots the cutout
-wall, so removing the front-facing rotation (or reverting to a back-facing
-frame) makes the +Z camera see a blank wall and fails the snapshot.
+wall, so reintroducing a spin about vertical makes the +Z camera see a blank
+wall and fails the snapshot. The snapshot is captioned, so a wrong render reads
+as wrong in a diff viewer rather than merely different.
 
 ## PoppyGL
 
@@ -551,13 +639,17 @@ Tests live in:
 - `poppygl/tests/`
 
 Feature-specific visual regressions should usually remain in the feature
-package and use PoppyGL as the renderer. For example:
+package and use PoppyGL as the renderer, unless the fixture needs a rendered
+board - `create-fdm-enclosure` sits below core in the dependency order and must
+not depend on it. The prefab enclosure fixtures therefore live in core:
 
-- `create-fdm-enclosure/tests/prefab-board-poppygl.test.ts`
+- `core/tests/enclosure/prefab-board-poppygl.test.ts`
 
 ## Observed enclosure failure
 
-The enclosure investigation exposed two separate compensations.
+The enclosure investigation exposed three separate defects. All three share a
+shape: a transform was re-derived by hand somewhere downstream instead of being
+composed from the one the geometry already used.
 
 ### Core wall-name compensation
 
@@ -570,7 +662,9 @@ front <-> back
 before constructing the FDM solver input.
 
 That changed the semantic JSCAD plan itself and made the direct `3d-viewer`
-path incorrect. Core now preserves physical wall names.
+path incorrect. Core now preserves physical wall names; once both sides adopt
+the Cartesian face vocabulary the conversion is an identity, so there is no
+table left for a compensation to hide in.
 
 File:
 
@@ -590,6 +684,51 @@ modified only one mesh path and did not account for:
 - final node translations;
 - rotations; or
 - cameras.
+
+### Layer-flip axis disagreement (measured, fixed upstream)
+
+`transformFootprintInsertionDirection` hand-rolled its own rotate-then-mirror
+math to carry a footprint's insertion direction into board space. Core flips
+footprint *geometry* with `flipY()` from `transformation-matrix` - which mirrors
+on the y-axis, negating **X** - applied **before** the component's rotation. The
+direction code instead negated **Y**, **after** rotating. Both the axis and the
+order differed.
+
+Because a reflection and a rotation do not commute (`F.R(t) = R(-t).F`), the two
+errors partly cancel: the results agree exactly at 90 and 270 degrees and are
+exactly reversed at 0 and 180. The net difference is a rotation by `2t + 180`.
+That is why the defect survived - the obvious spot-check rotations are the ones
+that agree, and the wrong answer is a valid direction name, so nothing threw.
+
+Consequence: a bottom-layer edge connector reported the opposite wall, and
+enclosure aperture generation cut the opening in the wrong wall.
+
+The fix composes the same matrix the geometry uses rather than restating it, so
+the direction cannot drift from the pads again:
+
+```ts
+compose(rotate(theta), isFlipped ? flipY() : identity())
+```
+
+Two properties of the fix generalize:
+
+- The Z-axis directions (`from_above`/`from_below`) invert on a layer change,
+  because a layer flip is a 180deg rotation about Y - `(x, y, z) -> (-x, y, -z)`
+  - not a mirror of the direction vector. Exactly two components invert; a full
+  inversion would be improper (determinant -1) and would render the part as its
+  own mirror image.
+- The regression tests derive their expected values from where pin1 actually
+  lands in the emitted Circuit JSON, across all eight layer/rotation
+  combinations, rather than restating the transform. A test that restates the
+  implementation pins the implementation, bugs included - which the previous
+  test did, asserting the wrong direction at 180 degrees.
+
+Files:
+
+- `core/lib/utils/pcb/transform-footprint-insertion-direction.ts`
+- `core/lib/components/base-components/PrimitiveComponent/PrimitiveComponent.ts`
+  (`_computePcbGlobalTransformBeforeLayout`, the `isPcbPrimitive && isFlipped`
+  branch - the reference transform)
 
 ## Problem statement
 
@@ -613,6 +752,57 @@ Instead:
 
 This makes local fixes fragile. A correction for one renderer or asset type can
 silently reverse another.
+
+## Transform authoring rules
+
+These follow directly from the failures above and apply until the shared
+architecture below replaces them with a single API.
+
+1. **Compose; never hand-roll a rotation matrix.** Use the repo's matrix library
+   (`transformation-matrix`) with `compose()` and `applyToPoint()`. Every defect
+   in "Observed enclosure failure" is a hand-written transform disagreeing with
+   the composed one it was meant to mirror.
+2. **Find the reference transform first.** Before writing a transform for an
+   object, find one that already moves the same way and build from the same
+   expression. Anything that follows a component - pads, silkscreen, a derived
+   direction, a cutout wall - must derive from the component's matrix so it
+   cannot drift when that matrix changes.
+3. **Cite what you copied.** Name the file, symbol and branch in a comment
+   beside the code, and quote the expression when short, so a reader can check
+   agreement without re-deriving the geometry.
+4. **Composition order is load-bearing.** `compose(a, b)` applies **b** first.
+   Reflections and rotations do not commute, so a wrong order is not cosmetic:
+   it silently inverts results at some angles and not others.
+5. **Distinguish points from directions.** A point picks up translation; a
+   direction must not. Applying a full affine transform to a direction vector is
+   a common and silent error.
+6. **Distinguish rotations from reflections.** Track the determinant. A layer
+   flip is a proper 180deg rotation; a reflection changes chirality and turns a
+   part into its mirror image.
+7. **Fix compensations at the source.** When two frames disagree, correct the
+   frame - do not add an offsetting flip downstream. A compensation is invisible
+   once the bug it offsets is fixed, and then it becomes the bug.
+8. **State the frame at every boundary.** Which frame, what the axes mean,
+   units, handedness, which way is up, and whether the value is a point or a
+   direction.
+
+### Validating an existing convention
+
+Matching surrounding code is correct only once the surrounding code is confirmed
+intentional. Conventions in this area have repeatedly turned out to be bugs or
+compensations for bugs elsewhere. Before adopting one, find its origin commit,
+the test that pins it, or a measurement that confirms it.
+
+Worked example: `flipY()` looked like a misuse (it negates X), but reading
+`transformation-matrix/src/flip.js` showed the named axis is the **mirror
+line**, so the naming is standard; `flipX` appears nowhere in `core/lib`; the
+choice was introduced deliberately alongside a visual snapshot; and
+`chip-layer-flip.test.tsx` pins it numerically. Only then was it safe to copy.
+KiCad exposes the same choice as a user preference, so there is no universal
+answer to appeal to - only this project's.
+
+The 3D renderers are the highest-risk area and the largest cleanup opportunity,
+for the reasons listed under "Problem statement".
 
 ## Required design decisions
 
@@ -700,22 +890,22 @@ Coordinate mappings with determinant -1 require:
 The shared transform API must distinguish rotations from reflections instead
 of representing both as arbitrary sign changes without validation.
 
-### 6. Default-camera / front-facing orientation
+### 6. Default-camera orientation
 
 Independent of the canonical transform chosen in decision 2, the project must
-define which glTF axis is "front" for standalone-model previews so viewers do
-not load facing the back. See "Vertical-axis orientation (front-facing
-convention)".
+define which glTF axis standalone-model previews present to the default camera,
+so viewers do not load facing the wrong side. See "Vertical-axis orientation
+(default-camera convention)".
 
-- Canonical rule: Circuit front (-Y) should map to glTF **+Z** for any preview
-  whose default camera is expected to show the front (glTF viewers, incl.
+- Canonical rule: **circuit +Y maps to glTF +Z** for any preview whose default
+  camera is expected to show the presented face (glTF viewers, incl.
   `<model-viewer>`, default to a +Z camera).
-- If decision 2 keeps the production net mapping `(-x, z, y)` (front at -Z),
-  standalone previews must apply a documented 180deg-about-vertical rotation
-  (front-facing), while combined board+connectors scenes keep the shared frame
-  and treat facing as a camera concern only.
-- Protect with an invariant test that a known front feature renders toward
-  glTF +Z in front-facing previews.
+- The production net mapping `(-x, z, y)` already satisfies this, so standalone
+  previews apply **no** compensating rotation. If decision 2 ever changes the
+  net mapping, the fix belongs in that mapping - not in a per-preview spin,
+  which is what previously rotted into presenting the wrong face.
+- Protect with an invariant test that a known +Y feature renders toward glTF +Z
+  in standalone previews.
 
 ## Proposed shared architecture
 
@@ -993,7 +1183,7 @@ Use:
 
 Feature-specific snapshots remain in their owning package. For example:
 
-- `create-fdm-enclosure/tests/prefab-board-poppygl.test.ts`
+- `core/tests/enclosure/prefab-board-poppygl.test.ts`
 
 ## Compatibility and versioning
 
