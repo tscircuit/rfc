@@ -1,10 +1,25 @@
 # Ordered Bus Routing
 
-`<bus>` marks ordered, point-to-point traces that should be routed as a bundle
-before ordinary autorouting. Users do not select a bus autorouter or assign a
-routing phase.
+`<bus>` marks ordered, point-to-point traces that must be routed as one parallel
+bundle before ordinary autorouting. Users do not select a bus autorouter or
+assign a routing phase.
 
-## Good: ordered point-to-point bus
+## Required contract
+
+- `preferredLayer` is required. It names the preferred shared trunk layer but
+  does not forbid the router from selecting a better valid trunk layer.
+- Every `connections` entry resolves to exactly one named, point-to-point trace.
+- All `from` terminals are on one common layer.
+- All `to` terminals are on one common layer. The common `from` and `to` layers
+  may differ.
+- Physical endpoint order must match; a valid bus never crosses.
+- Every member uses the same trunk layer. A member may enter and leave that
+  layer, but may contain at most two vias.
+
+Invalid declarations, endpoint layers, or endpoint order are source errors
+detected before bus routing. The two-via limit is enforced while routing.
+
+## Good: valid bus
 
 ```tsx
 <trace name="D0" from=".U1 > .D0" to=".J1 > .D0" />
@@ -14,26 +29,22 @@ routing phase.
 <bus
   name="DATA"
   connections={["D0", "D1", "D2"]}
-  pcbAllowedLayers={["top"]}
+  preferredLayer="inner1"
 />
 ```
 
-The bus router runs automatically before user-defined and ordinary routing
-phases. It creates no vias, preserves endpoint order, and commits the entire
-bus atomically. Routed bus traces become obstacles for later phases.
+The router first attempts a parallel trunk on `inner1`. It may select another
+shared trunk layer when that produces a better valid fit. It commits the entire
+bus atomically, then ordinary autorouting handles non-bus traces. Completed bus
+traces become obstacles for later routing.
 
-An alternate single layer may be requested:
+## Bad: missing preferred layer
 
 ```tsx
-<bus
-  name="DATA"
-  connections={["D0", "D1", "D2"]}
-  pcbAllowedLayers={["bottom"]}
-/>
+<bus name="DATA" connections={["D0", "D1", "D2"]} />
 ```
 
-`pcbAllowedLayers` is required and version one accepts exactly one layer. A bus
-never guesses its routing layer.
+This produces a source error. The router must not guess the user's preference.
 
 ## Bad: non-point-to-point member
 
@@ -42,40 +53,34 @@ never guesses its routing layer.
 <trace from="net.D0" to=".J1 > .D0" />
 <trace from="net.D0" to=".TP1 > .pin1" />
 <trace name="D1" from=".U1 > .D1" to=".J1 > .D1" />
-<bus
-  name="DATA"
-  connections={["D0", "D1"]}
-  pcbAllowedLayers={["top"]}
-/>
+<bus name="DATA" connections={["D0", "D1"]} preferredLayer="top" />
 ```
 
-Every entry must resolve to exactly one named trace with exactly two terminal
-pins. A branch is a source error:
+`D0` has three terminal pins, so the declaration produces a source error.
+Unknown connections, duplicate entries, or membership in multiple buses are
+also source errors.
 
-```text
-Bus "DATA" connection "D0" is not point-to-point: it has 3 terminal pins.
-```
+## Bad: inconsistent endpoint layers
 
-Unknown connections, duplicate entries, membership in multiple buses, a
-missing `pcbAllowedLayers`, or an allowed-layer count other than one are also
-source errors. No routing starts while the bus declaration is invalid.
+If some `from` terminals are on `top` and others are on `bottom`, the bus
+produces `BUS_FROM_LAYER_MISMATCH`. The equivalent `to` condition produces
+`BUS_TO_LAYER_MISMATCH`. The common `from` layer may differ from the common
+`to` layer.
 
 ## Bad: crossing
 
-If the physical order at the `from` endpoints differs from the order at the
-`to` endpoints, the bus would require a crossing. This is a source error named
-`BUS_ENDPOINT_ORDER_CROSSES`. It must be detected before invoking the bus
-router. A crossing bus is invalid because bus members must remain parallel.
+If the physical order at the `from` terminals differs from the order at the
+`to` terminals, rendering produces `BUS_ENDPOINT_ORDER_CROSSES`. This is a
+source error and the bus router is never invoked.
 
-## Bad: blocked geometry
+## Bad: no valid route
 
-If a valid bus has no shared corridor on its selected layer, routing fails with
-`BUS_NO_SHARED_CORRIDOR`. No bus traces are committed. Bus members are not sent
-to the ordinary autorouter because doing so would discard the bus guarantee.
+If no parallel shared-layer route exists within the two-via-per-member limit,
+routing fails with `BUS_NO_SHARED_CORRIDOR` or `BUS_VIA_LIMIT_EXCEEDED`. No bus
+traces are committed, and bus members are not passed to ordinary autorouting.
 
-## Success and failure contract
+## Result contract
 
-- **Success:** every member is routed, then ordinary autorouting begins.
-- **Invalid API or crossing:** rendering reports a source error before routing.
-- **Blocked geometry:** routing fails without retaining a partial bus or
-  rerouting its members as ordinary traces.
+- **Success:** the complete parallel bus is committed before ordinary routing.
+- **Invalid contract:** rendering reports a source error before bus routing.
+- **No valid route:** routing fails without retaining a partial bus.
