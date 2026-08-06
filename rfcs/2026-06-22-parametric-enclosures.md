@@ -20,11 +20,10 @@ automatically. Moving a connector moves its opening; moving or adding a mounting
 hole moves or adds its support; changing a component body updates enclosure
 clearance checks.
 
-Circuit JSON is the authoritative rendered board and CAD output. Core renders
-the electrical board; `@tscircuit/enclosure` consumes that output plus the live
-assembly/enclosure TSX and appends generated CAD models using existing Circuit
-JSON records. Circuit authors should not reproduce board dimensions in a second
-design.
+Circuit JSON is the authoritative rendered board and CAD output. Core renders the
+electrical board and, in a later render phase, the enclosure declared alongside
+it, appending generated CAD records to the same document. Product designers need
+not reproduce board dimensions in a second design system.
 
 ## Status
 
@@ -43,20 +42,28 @@ originally proposed.
 | Enclosure and assembly DRC | deferred by design (see below) |
 | Non-connector part-family inference beyond exact placement | partial |
 
-**The elements live in `core`, not in an enclosure package.** This document
-planned a single `@tscircuit/enclosure` owning both the authoring elements and
-the geometry. What shipped splits them: `core` owns the elements and the Circuit
-JSON emission, `@tscircuit/props` owns the props, and
-`@tscircuit/create-fdm-enclosure` owns the solver — a pure,
-process-specific geometry package that knows nothing about React or the renderer
-tree, and that a CNC or sheet-metal sibling can be written against.
+### Where enclosures plug into tscircuit
 
-That split fell out of a constraint this document did not anticipate: an
-enclosure needs the *rendered* board (component bodies, insertion directions,
-measured CAD bounds), so the elements must participate in core's render passes
-rather than post-process its output. Keeping the solver separate preserves what
-the enclosure package was for — one place to add a manufacturing process — while
-letting the elements sit where the facts are.
+tscircuit's existing layers each own one thing, and enclosures use them as they
+are:
+
+| Layer | Owns | Enclosure additions |
+| --- | --- | --- |
+| `@tscircuit/props` | React-independent Zod prop schemas | `assemblyProps.device`, `enclosureProps.fdm.box`, `enclosureProps.cutoutaperture` |
+| `circuit-json` | the interchange records everything else reads and writes | `source_assembly_device`, `source_fdm_enclosure`, `source_cutout_aperture`, `cad_fdm_enclosure` |
+| `core` | the renderer tree: `Renderable` components and their ordered render phases | `AssemblyDevice`, `EnclosureFdmBox`, `EnclosureCutoutAperture` host elements, and the emission of the records above |
+| `@tscircuit/create-fdm-enclosure` | geometry: a pure solver over plain data | the enclosure problem, its resolution, and the JSCAD plans |
+
+An enclosure is generated from the **rendered** board — component bodies,
+insertion directions, measured CAD bounds, resolved placements — so the elements
+belong in core's render phases, where those facts exist and are ordered. Core
+runs `EnclosureRender` after `CadModelRender` for exactly this reason: a
+`cad_component` must exist before an aperture can read the body behind it.
+
+The solver stays outside core because geometry is where manufacturing processes
+differ. It takes plain data and returns plain data, knows nothing about React or
+the renderer tree, and is the layer a CNC or sheet-metal sibling is written
+against. Its tests need no circuit at all.
 
 ## Summary
 
@@ -69,8 +76,11 @@ Enclosure authoring has two complementary root concepts:
    and CAD model. It explicitly declares the size and shape of an enclosure
    opening required to use that part.
 
+In addition, the multiple components of an enclosure and the PCB itself must
+be grouped together by declaring an Assembly.
+
 ```tsx
-import { assembly, enclosure } from "@tscircuit/enclosure"
+import { assembly, enclosure } from "@tscircuit/create-fdm-enclosure"
 
 export const UsbC = (props) => (
   <connector {...props}>
@@ -96,20 +106,33 @@ export default () => (
 The enclosure specification answers **how the product is enclosed**. The
 cutout-aperture specification answers **what opening a particular part
 requires**. Aperture placement combines explicit part metadata with
-part-family-specific inference.
+part-specific inference.
 
-The working `pcb-enclosure` reference implementation currently demonstrates:
+Beyond the contracts listed under [Status](#status), the FDM box also generates
+PCB mounting posts or external corner fastening ears, visible BoM-able screws and
+bushings, and JSCAD-backed preview and STL output.
 
-- an FDM-first, two-part box with a base and lid, emitted as one CAD record per
-  printed part;
-- PCB mounting posts or external corner fastening ears;
-- automatic placement of explicitly declared apertures on any of the six faces,
-  for connectors and non-connector parts alike;
-- visible, BoM-able screws and bushings;
-- JSCAD-backed preview and STL output.
+### Package layering
 
-`@tscircuit/enclosure` will replace that reference package. The public API and
-artifact pipeline will be developed there.
+Development of all three concerns — assembly, enclosure, and the FDM process —
+starts inside `@tscircuit/create-fdm-enclosure`, so one package can be iterated
+on without a release dance between three. Inside it, the generic layers are kept
+strictly separate from the process-specific one:
+
+| Directory | Scope | May import |
+| --- | --- | --- |
+| `lib/assembly/` | assembly-generic: the board/standoff/seam frame every process shares | nothing below it |
+| `lib/enclosure/` | enclosure-generic: faces, aperture inputs, component-body envelopes, resolved placements | `lib/assembly/` |
+| `lib/fdm/`, `lib/apertures/` | FDM-specific: shells, lips, cutout plans, design rules | both of the above |
+
+The dependency direction is enforced by the modules themselves, not by
+convention: `resolve-enclosure-assembly-frame.ts` states that it must not import
+from `lib/enclosure/` or `lib/fdm/`, because the assembly frame is what a
+sheet-metal or CNC enclosure would also resolve.
+
+Keeping the boundary now means breaking `@tscircuit/assembly` and a generic
+enclosure package out later is a move, not a rewrite. Whether that split is worth
+making is deferred until a second process exists to justify it.
 
 ## Enclosure Specification
 
@@ -129,21 +152,21 @@ enclosureProps.cutoutaperture
 ```
 
 Those values validate props; they are not renderable React components. The
-renderable lowercase `assembly` and `enclosure` namespaces will be exported by
-`@tscircuit/enclosure`. The working reference implementation constructs them in
-`pcb-enclosure`.
+renderable lowercase `assembly` and `enclosure` namespaces are exported by
+`@tscircuit/create-fdm-enclosure`, and the host elements they resolve to are
+registered in `core`.
 
-`<assembly.device>` is the product-level root. Its initial implementation is a
-no-output host wrapper that gives the physical product an identity and contains
-the board, enclosure, and later assembly occurrences without creating
-electrical group, subcircuit, transform, or layout semantics.
+`<assembly.device>` is the product-level root. It gives the physical product an
+identity and contains the board, enclosure, and later assembly occurrences,
+emitting only `source_assembly_device` — no schematic, PCB, or subcircuit record,
+and no electrical group, transform, or layout semantics.
 
 `<enclosure.fdm.box />` is a sibling of `<board />` inside that wrapper and
 selects its board through the required `boardRef`. It is not owned by or nested
 inside the board.
 
 ```tsx
-import { assembly, enclosure } from "@tscircuit/enclosure"
+import { assembly, enclosure } from "@tscircuit/create-fdm-enclosure"
 
 export default () => (
   <assembly.device name="controller">
@@ -163,10 +186,6 @@ export default () => (
 )
 ```
 
-`assembly.device` is the single explicit root. It remains an external no-output
-tree node so imported assembly and enclosure metadata is available to the
-renderer without creating electrical group or subcircuit semantics.
-
 The explicit board selector leaves room for future multi-board assemblies.
 
 The upstream `enclosure.fdm.box` props currently provide `boardRef`, optional
@@ -178,20 +197,19 @@ implementation additionally exercises:
 | `floorThickness` | Base floor thickness. |
 | `lidThickness` | Lid top-plate thickness. |
 | `boardClearance` | XY gap from PCB edge to the inner wall. |
-| `standoffHeight` | Gap from floor top to PCB bottom. |
-| `topHeadroom` | Clearance above the tallest top-side component. |
+| `standoffHeight` | Gap from floor top to PCB bottom, where the board is supported by standoffs. |
+| `topHeadroom` | (optional) Enclosure clearance above the board; If not specified, auto-detected from the tallest component. |
 | `lidLipDepth` | Depth of the friction-fit lid lip. |
-| `disableCutouts` | Disable placement of apertures explicitly declared by parts. Declared apertures are placed by default; openings are never invented from body bounds. |
+| `disableCutouts` | Disable placement of apertures declared by parts. |
 
-### Manufacturing processes and design rules
+### Enclosure manufacturing processes and design rules
 
 `enclosure.fdm.box` identifies the initial supported manufacturing/construction
 combination: an FDM-produced box. The dotted namespace may grow to represent
 other constructions and processes, but no universal taxonomy is committed yet.
 A clamshell, sleeve, modified prefab enclosure, bent sheet-metal enclosure, and
-machined enclosure may require different parts, assembly motion, props, and DRC;
-they should not be forced through one interchangeable component when their
-semantics differ.
+machined enclosure may require different parts, assembly motion, props, and DRC,
+so can be implemented as peer namespace/packages.
 
 Each concrete namespace leaf selects a coherent design-rule profile. Rules must
 remain injectable and testable rather than scattered through geometry code.
@@ -205,95 +223,7 @@ Examples include:
 Construction logic and process rules are related but distinct. Assembly behavior
 defines seams, retention, mounting, and insertion motion. Manufacturing rules
 constrain whether that assembly can be produced using the selected process.
-Different public components may share internal solvers without implying that
-users can safely swap their namespace paths without revisiting the design.
-
-### Mounting and hardware
-
-Board-level, electrically unowned holes become candidate PCB supports. The
-current `m3-heat-set` stack derives:
-
-- support-boss dimensions;
-- insert bore and melt relief;
-- lid retention column;
-- countersunk screw seat; and
-- screw and insert BoM entries.
-
-The mounting-hardware catalog is data-driven and accepts built-in keys, user
-overrides, or inline stacks. Hardware dimensions and BoM identity stay together.
-
-When PCB mounting holes do not cover a corner, the current solver adds an
-external fastening ear rather than placing a screw through the board cavity.
-Purchased hardware is represented as visible assembly parts with grouped BoM
-identity.
-
-### Geometry and output artifacts
-
-The current split-shell construction contains:
-
-- a base tub with floor, walls, and PCB supports;
-- a lid plate with a friction lip and retention features; and
-- declared apertures routed to the wall, base, or lid forming the selected face.
-
-Feature recipes currently lower to internal `jscad-planner` operations and
-`@jscad/modeling` meshes. JSCAD is an implementation backend, not the public
-enclosure representation.
-
-`@tscircuit/enclosure` should emit standard mechanical artifacts, including as
-appropriate:
-
-- individual and assembly STEP;
-- GLB/GLTF preview;
-- STL or 3MF for additive manufacturing; and
-- DXF or other process-specific files for 2D cutting.
-
-The output layer may provide individual manufacturing parts, a complete
-assembly, a mechanical BoM, and a preview GLB.
-
-### Assembly checks are deferred
-
-The reference implementation no longer performs enclosure collision or
-insertion-path DRC. Those checks depend on product occurrences, assembly state,
-motion, and intentional interfaces, so they will be reintroduced under
-`assembly.device` rather than attached to an isolated enclosure model.
-
-Top- and bottom-mounted bodies, Z offsets, through-hole leads, clips, and other
-far-side projections still contribute to enclosure sizing and standoff
-clearance. Invalid dimensions and unresolved required geometry continue to
-surface as rendering errors.
-
-Until that DRC exists, generated enclosure features are **not** checked against
-anything inside the enclosure. Known consequences of the current geometry-only
-implementation:
-
-- the friction-fit lid lip is clamped only to the base cavity, so a
-  `lidLipDepth` greater than the available `topHeadroom` will intersect the PCB
-  and any component near the board edge without an error or warning;
-- printed features are not checked against component bodies, only against the
-  shell they belong to; and
-- an aperture is validated against its own wall, not against the part that is
-  supposed to reach it.
-
-These are clearance rules, not geometry bugs. They belong to the deferred
-enclosure/assembly DRC pass and must not be patched piecemeal into individual
-geometry stages: checking the lip against the PCB alone would still miss
-components, connectors, and hardware.
-
-### Current reference coverage
-
-The prefab-board reference example exercises:
-
-- five M3 PCB supports;
-- two USB-C receptacles;
-- Micro-USB, USB-A, DC barrel, 3.5 mm audio, and SMA connectors;
-- tactile switches with 15 mm plungers, which exit through the lid;
-- concrete supplier footprints, silkscreen outlines, OBJ models, and aperture
-  metadata; and
-- twelve declared apertures automatically placed across **all six faces**,
-  including lid and floor.
-
-Each wall and face is additionally snapshotted straight on, so a cutout that
-drifts off its connector is visible rather than merely unasserted.
+Different public components may share internal solvers.
 
 ## Cutout Aperture Specification
 
@@ -389,55 +319,22 @@ Every branch may carry `margin` (extra clearance on every edge),
 Numbers use the project default unit; explicit distance strings such as
 `"3.66mm"` and `"0.1in"` may be mixed.
 
-A cutout is generated only when a part or enclosure author explicitly supplies an
-aperture. Components without one do not receive an inferred opening. Declared
-apertures are placed automatically unless `disableCutouts` is set. Automatic
-placement never invents aperture existence, shape, or size. Body and CAD bounds
-may help place or validate a requested feature; they never imply that a component
-needs an enclosure opening.
-
 ### Placement across the face
 
 An aperture supplies `face` plus `center`, an interaction point in **board
-coordinates relative to the board centre**. The enclosure layer projects that
+coordinates relative to the board center**. The enclosure layer projects that
 point onto the face: the two coordinates tangent to the face position the
 opening, and the coordinate along the face normal is discarded. Callers never
 decide which axis matters.
 
 `widthDimensionOffset` and `heightDimensionOffset` then move the opening's centre
-across that face, along the same two axes its `width` and `height` are measured
-in. Both may be negative.
+across the face that the aperture cuts, along the same two axes its `width` and
+`height` are measured in for the aperture itself. Both may be positive or negative
+to offset on the cartesian axis.
 
-**These replaced `zExtentAboveBoard`**, which only made sense on the four walls:
-on the lid and the floor an opening does not move in Z at all, so a "Z extent" had
-no meaning there. Sharing a frame with the dimensions is the point — on a side
-face `heightDimensionOffset` runs the way `height` does, and on a horizontal face
-both follow the part's own rotation, exactly as the opening itself does. There is
-no separate Z quantity left to reason about.
-
-Zero means *wherever the part puts it*, which is usually right:
-
-- **Side faces** centre the opening on the part's body above the board, taken
-  from `componentBody.aboveBoardHeight` — the model's measured bounds. An opening
-  lines up with the connector it serves without anyone computing a height. A part
-  with no measured bounds falls back to half the opening's own margin-inflated
-  height, resting its lower edge on the mounting surface.
-- **Horizontal faces** centre on the part's own position, and both offsets turn
-  with the part.
-
-`heightDimensionOffset` runs **outward from the mounting surface** on a side face:
-up from the board top for a top-mounted part, down from the board bottom for a
-bottom-mounted one (`boardSide`, default `"top"`). Like the default it shifts, it
-describes the part rather than where the part was placed, so the same authored
-number is correct on either side of the board. A negative value pulls the opening
-back toward and past the board — needed when a cable jacket is fatter than the
-connector it plugs into. The binding constraint is that the opening must not cut
-into the enclosure floor.
-
-This is why the offsets are expressed as *dimension* offsets rather than as
-caller corrections in the board frame, which an earlier draft proposed: a
-correction framed in world axes has to be recomputed whenever inference changes,
-while an offset in the face's own frame describes the part and stays valid.
+Zero means *wherever the part puts it*, which is usually right or close to right,
+requiring only a small amount of manual nudging in coordinate directions that
+should make sense to a human or an agent.
 
 ### Depth: the third aperture dimension
 
@@ -447,18 +344,15 @@ behind the face (the lid lip today, mounting bosses later) is left obstructing a
 part that reaches past the wall.
 
 Because it is the face-normal dimension, what it cuts is whatever material lies
-along that normal, which is generally **not** the face it entered. A large `z_pos`
-opening in a corner is bounded in X and Y by `width` and `height`, and its depth
-relieves the side walls it overlaps — otherwise the lid would open above a part
-while the wall stayed intact beside it.
+along that normal, including enclosure parts other than the face it entered.
+A large `z_pos` opening in a corner is bounded in X and Y by `width` and `height`,
+and its depth cuts the side walls it overlaps - this allows us to cut pockets
+into lip, top, and other walls in order to accommodate parts near the board corner 
+that would otherwise collide with the inside of the case.
 
 **An authored depth is rendered as authored, on every face.** Nothing is capped to
 the cavity: a deep enough opening reaches the shell on the far side and cuts it
-too. That is deliberate. Capping was tried and removed, because it was applied
-inconsistently — the four side faces were never capped, so the same authored
-number meant "as drawn" on a wall and "as much as fits" on the lid — and because
-silently cutting a shallower hole than requested is its own defect: the part fouls
-the shell and the model gives no sign why.
+too. This is deliberate in order to avoid collisions.
 
 When `depth` is not authored, an adapter may instead supply `componentBody`: the
 part's authored body `size` in its own frame, the `rotation` it is placed at, the
@@ -467,74 +361,13 @@ above the board. This package projects that envelope onto the face normal and
 uses the result, taking the footprint as a floor since pad fans and courtyards can
 reach further inboard than the body itself.
 
-**A derived depth is converted into the face's own datum first, and this is
-load-bearing.** `aboveBoardHeight` is measured from the *board*; a depth on a
-horizontal face is measured from the *plate's outer surface*, a whole cavity
-away. Using the reach raw produced a 15 mm cut measured down from the lid on a
-19.35 mm box, ending 0.15 mm inside the floor — a circular pocket in the bottom of
-every box carrying a tall pushbutton. Stated as one span in one frame, the cut
-runs from the plane the part is mounted on up to whichever is higher, the top of
-the part or the outer face of the plate; only the part of that span inside the
-shell removes anything, so the derived depth is `|plateOuter − mountZ|`. Both ends
-matter: the upper bound is why a 1 mm part still gets a hole clean through the
-plate, and the lower bound is why a 400 mm part cannot reach the plate at the far
-end.
-
 The projection is one scalar: it sets how deep the opening travels, **not** how
 wide or tall it is. Those still come from the aperture's own
 `width`/`height`/`radius`, so a body wider than its aperture is not relieved. Full
 body-envelope clearance — subtracting the whole part from the shell so nothing
-fouls it — is a separate and still unimplemented concern.
-
-For through-hole and side-entry components, `componentBody.size.z` is taller than
-the part's reach above the board, because it spans the pins and shell hanging
-below it. `aboveBoardHeight` is the honest number and is preferred wherever
-present; `size.z` remains a poor fallback for parts whose model was never
-measured. Measure the model, or authorise `depth` explicitly.
-
-### Shell routing
-
-An aperture is subtracted only from the parts whose faces it can reach: `z_pos`
-to the lid, `z_neg` to the base, and side faces to both, so an opening straddling
-the base/lid seam is split between them. A `z_pos` or `z_neg` aperture takes its
-extent along the normal from the plate it pierces, so a lid cutout is bounded by
-`lidThickness` and a floor cutout by `floorThickness`.
-
-The lid is additionally raised, when `topHeadroom` was not authored, so that it
-and its lip clear every side-face aperture: half a hole cut in the base and half
-in a lid that slides on afterwards is not a hole, it is a notch in two pieces
-that no part can pass through.
-
-### Resolution order
-
-Face selection, in precedence order:
-
-1. transformed `pcb_component.insertion_direction` → face (`from_above` → `z_pos`
-   on a top-mounted part, `z_neg` on a bottom-mounted one), else
-2. part-family inference, else
-3. nearest reachable face by distance from the component body.
-
-An explicit `face` prop is **not** implemented and deliberately sits below the
-inferred value in priority when it is: a part's insertion direction is a fact
-about the part, while a face override is a statement about one board. The
-override is wanted for parts whose direction cannot be expressed — an aperture
-serving something that is not a connector at all — and until such a case is in
-hand there is nothing to design against.
-
-Then, within the chosen face:
-
-1. connector families: `pcb_component.cable_insertion_center` projected onto the
-   face;
-2. all other families: `pcb_component.center` projected onto the face — which is
-   **exact**, so horizontal-face apertures need no inference at all;
-3. `componentBody` supplies the default centre along `height` on a side face;
-4. `widthDimensionOffset`/`heightDimensionOffset` are applied last.
-
-`@tscircuit/infer-cable-insertion-point` is inherently two-dimensional: it
-examines pads, holes, silkscreen, bounds and insertion direction to infer a
-board-plane point and mating side, and cannot identify an opening's height. That
-is precisely the gap `componentBody.aboveBoardHeight` fills, which is why the
-height default is measured from the model rather than inferred.
+fouls it — is a separate and still unimplemented concern. However, we have added
+the model bounds relative to the board so we can implement bounding box collision
+checking.
 
 ### Reusable defaults and caller replacement
 
@@ -626,25 +459,28 @@ should remain focused on connectors.
 - **Clearance DRC** between generated features and enclosed components, which
   remains deferred to enclosure/assembly DRC.
 
-### Open questions
+## Mounting Hardware and Assembly
 
-1. For a part mounted on the board bottom with `from_above`, is the correct face
-   `z_neg` (mates through the floor) or an error (mates into the board)?
-2. Should a horizontal aperture support a recessed pocket — a Z datum below the
-   plate's outer surface — or is "through the plate" always sufficient?
-3. Are dimension offsets applied before or after face-containment validation?
-   Before means a nudge can produce an actionable error; after means a nudge can
-   silently push an opening off its face.
+Board holes will be extended with a property similar to cutout aperture which
+will select them as a mounting hole, and potentially define their mounting hardware
+(this is TBD; mounting hardware may be specified at enclosure and/or assembly level)
 
-## Assembly Device and Physical Assembly
+Required mounting hardware such as screws, nuts, spacers, and heat-set bushings will
+be selected from a catalog and added to the BOM.
+
+### Assembly Device and Physical Assembly
+
+Assembly process (steps, ordering, etc) will be specified or derived by the
+assembly module. The assembly solver will implement DRC that performs
+insertion-path and clearance checks, and validates that the product is actually
+buildable as designed.
 
 An enclosure manufactures the case parts; it does not by itself describe how to
-assemble the finished device. `assembly.device` initially supplies the
-product-level root and identity from `@tscircuit/enclosure`; its process and
-manufacturing semantics remain planned:
+assemble the finished device. `assembly.device` supplies the product-level root
+and identity; its process and manufacturing semantics remain planned:
 
 ```tsx
-import { assembly, enclosure } from "@tscircuit/enclosure"
+import { assembly, enclosure } from "@tscircuit/create-fdm-enclosure"
 
 <assembly.device name="controller">
   <board name="B1">...</board>
@@ -743,10 +579,10 @@ applies no product-assembly or process-planning algorithms. Reusing its name for
 finished-device assembly would conflate CAD representation with real-world
 assembly and substantially change existing meaning.
 
-`assembly.device` is therefore the explicit product root. Its initial no-output
-implementation is intentionally small, while later product structure, process,
-DRC, and export semantics can attach to the same wrapper without overloading
-ECAD grouping.
+`assembly.device` is therefore the explicit product root. Its implementation is
+intentionally small — an identity record and a container — while later product
+structure, process, DRC, and export semantics attach to the same wrapper without
+overloading ECAD grouping.
 
 ## Development Standards
 
@@ -756,7 +592,7 @@ Assembly and enclosure development follow React Strict DOM-like imported
 namespaces:
 
 ```tsx
-import { assembly, enclosure } from "@tscircuit/enclosure"
+import { assembly, enclosure } from "@tscircuit/create-fdm-enclosure"
 
 <assembly.device>
   <board name="B1" />
@@ -794,30 +630,36 @@ CAD. Assembly and interface authoring intent remains in imported TSX:
 board/component Circuit JSON       imported assembly/enclosure TSX
                 \                           /
                  \                         /
-                    @tscircuit/enclosure
+             core enclosure render phase
                              |
                   canonical product Circuit JSON
                     /                    \
-       cad_component.model_jscad     manufacturing exports
+    cad_fdm_enclosure.model_jscad    manufacturing exports
                     |                 STEP / STL / 3MF / DXF
           circuit-json-to-gltf
                     |
               GLB / PoppyGL
 ```
 
-No Circuit JSON schema change is required. Each generated case part or hardware
-occurrence uses the existing record trio:
+A generated enclosure part is a **typed record**: one `cad_fdm_enclosure` per
+printed part, carrying the serialized JSCAD plan, its `enclosure_part` role, and
+the position that places it. It has no PCB owner, because it is not on the PCB.
 
-- a synthetic `source_component` for identity and display name;
-- a zero-size, non-obstructing, `do_not_place` synthetic `pcb_component`; and
-- a `cad_component` whose existing `model_jscad` field contains the serializable
-  JSCAD operation tree.
+`cad_component` is the wrong record for it in two independent ways. It requires
+PCB ownership, which forces a zero-size `pcb_component` whose placement and
+obstruction semantics then have to be disabled by hand — a record existing only
+to satisfy a foreign key, which every consumer must learn to ignore. And its
+asset-normalization fields (model origin, board normal, anchor, object fit)
+describe how to fit a *supplied part file* to a footprint; a generated plan is
+already authored in Circuit world coordinates, so `position` alone places it.
 
-The synthetic source/PCB records are compatibility scaffolding required by the
-current `cad_component` ownership contract. They are not semantically PCB
-components and must remain excluded from placement, obstacle, and manufacturing
-analysis. A future generic CAD-owner relationship may remove this compromise,
-but this RFC does not require a Circuit JSON library change.
+Generated **hardware** — screws, inserts, washers, standoffs — is a different
+problem and is not solved by `cad_fdm_enclosure`, since a screw is not an FDM
+enclosure and its meaningful relationship is to the mount it occupies. Hardware
+therefore keeps the synthetic `source_component` + `pcb_component` +
+`cad_component` triple for now, excluded from placement, obstacle, and
+electrical-BOM analysis. See [Future proposal: physical hardware occurrence
+records](#future-proposal-physical-hardware-occurrence-records).
 
 Serialized JSCAD operation trees are an allowed Circuit JSON CAD
 representation. They are rendered by `circuit-json-to-gltf` and survive worker
@@ -855,10 +697,12 @@ APIs must not repeat the `rotated_rect`/`rotated_pill` discriminant pattern.
 
 ### Distribution
 
-`@tscircuit/enclosure` replaces the `pcb-enclosure` reference package as the
-long-term implementation and distribution home. During incubation it exports
-both `assembly` and `enclosure`; `assembly` may later move to a dedicated
-package. Projects that do not import these namespaces remain unchanged.
+`@tscircuit/create-fdm-enclosure` is the distribution home while the API
+incubates, exporting both `assembly` and `enclosure` alongside the FDM solver.
+The internal layering described under [Package
+layering](#package-layering) is what allows `assembly`, and a
+process-generic enclosure layer, to move to their own packages later without
+rewriting either.
 
 Projects importing these namespaces append canonical CAD records using existing
 Circuit JSON shapes. Projects that do not import them continue producing the
@@ -916,13 +760,15 @@ These decisions should follow implementation experience rather than precede it.
 ### 1. Establish `assembly.device`
 
 Add the React-independent `assemblyProps.device` contract to
-`@tscircuit/props` and export the imported `assembly.device` component from
-`pcb-enclosure`, later `@tscircuit/enclosure`:
+`@tscircuit/props`, register the `AssemblyDevice` host element in `core`, and
+export the imported `assembly.device` namespace from
+`@tscircuit/create-fdm-enclosure`:
 
 - accept an optional product-level `name`;
 - contain boards, enclosure specifications, and later assembly occurrences;
 - retain children in the renderer tree;
-- emit no source, schematic, PCB, CAD, or subcircuit record; and
+- emit `source_assembly_device` and nothing else — no schematic, PCB, CAD, or
+  subcircuit record; and
 - avoid implicit electrical-group semantics.
 
 ### 2. Consolidate connector aperture placement
@@ -939,28 +785,27 @@ Migrate connector behavior into the explicit aperture-placement model:
 
 Keep `enclosure.cutoutaperture` exactly aligned with its upstream props schema.
 
-### 3. Migrate the reference implementation
+### 3. Separate the generic layers from the FDM process
 
-Move or replicate the working `pcb-enclosure` implementation into
-`@tscircuit/enclosure`:
+Inside `@tscircuit/create-fdm-enclosure`:
 
-- expose the merged `enclosure.fdm.box` and
-  `enclosure.cutoutaperture` contracts plus `assembly.device`;
-- preserve current FDM box sizing, supports, hardware, and exports;
-- consume the rendered board records and append existing source/PCB/CAD records
-  carrying `model_jscad`;
-- retain only package-private renderer/host adapters;
-- remove the legacy public `<enclosure>` intrinsic surface; and
-- preserve explicit-aperture behavior.
+- keep `lib/assembly/` free of any enclosure or process concept, so the frame it
+  resolves is the one a sheet-metal or CNC enclosure would also resolve;
+- keep `lib/enclosure/` free of FDM specifics: faces, aperture inputs,
+  component-body envelopes, and resolved placements are process-independent, and
+  a process consumes them rather than redefining them;
+- confine shells, lips, cutout plans, and design rules to `lib/fdm/`; and
+- express the direction of dependency in the modules themselves, so a violation
+  is visible at the import rather than at review time.
 
-This phase is complete when the existing prefab-board reference renders and
-exports equivalent enclosure parts from `@tscircuit/enclosure`.
+This phase is complete when a second process could be added by writing a sibling
+of `lib/fdm/` alone.
 
 ### 4. Integrate canonical enclosure rendering
 
 1. core renders the board and applies registered Circuit JSON postprocessors;
-2. `@tscircuit/enclosure` consumes the board records and imported
-   `assembly.*`/`enclosure.*` TSX;
+2. the enclosure render phase consumes those records plus the imported
+   `assembly.*`/`enclosure.*` TSX, and calls the solver;
 3. the enclosure renderer appends **typed** `cad_fdm_enclosure` records, one per
    printed part, carrying `model_jscad`;
 4. `circuit-json-to-gltf` executes the serialized plans and composes the
@@ -968,15 +813,8 @@ exports equivalent enclosure parts from `@tscircuit/enclosure`.
 5. RunFrame, CLI workers, saved builds, and static viewers consume the same
    canonical Circuit JSON without an out-of-band artifact channel.
 
-Step 3 deliberately does **not** append synthetic source/PCB owners, as an
-earlier draft of this plan proposed. `cad_component` requires PCB ownership,
-which forced a zero-size `pcb_component` whose placement and obstruction
-semantics then had to be disabled by hand — a record that existed only to satisfy
-a foreign key, and that every consumer had to learn to ignore. A generated
-enclosure part has no PCB owner because it is not on the PCB; a typed record says
-so directly. The plan is authored in Circuit world coordinates, so none of
-`cad_component`'s asset-normalization fields (model origin, board normal, anchor,
-object fit) apply either — `position` alone places it.
+Step 3 emits typed records with no synthetic PCB owner, for the reasons given
+under [Circuit JSON product model](#circuit-json-product-model).
 
 ### 5. Prototype non-connector interaction inference
 
@@ -996,7 +834,8 @@ placement fallback independently.
 ### 6. Expand `assembly.device`
 
 Expand the imported, lowercase dotted `assembly` namespace incubating in
-`@tscircuit/enclosure`:
+`@tscircuit/create-fdm-enclosure`, keeping it in `lib/assembly/` so it stays
+separable:
 
 - model device-level occurrences including boards, daughterboards, enclosure
   parts, displays, harnesses, ribbon cables, hardware, and consumables;
