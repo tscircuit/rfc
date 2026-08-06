@@ -4,6 +4,14 @@
 bundle before ordinary autorouting. Users do not select a bus autorouter or
 assign a routing phase.
 
+## Motivation
+
+Global autorouting becomes harder when simple ordered bundles compete with
+arbitrary traces. Buses are usually direct, with corresponding terminals facing
+each other. Routing these easy segments together first breaks one large routing
+problem into smaller stages and leaves the general autorouter only the irregular
+remaining connections.
+
 ## Required contract
 
 - `preferredLayer` is required. It names the preferred shared trunk layer but
