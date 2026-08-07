@@ -27,20 +27,24 @@ not reproduce board dimensions in a second design system.
 
 ## Status
 
-Substantially implemented, in a different package layout than this document
-originally proposed.
+Basic enclosure and cutout are working with reasonable proposal for props,
+circuit-json, and core integration. Renderers are hooked up and tested. Mounting
+hardware and assembly design rules are next (these were implemented in the reference
+implementation, we need to rewrite them to our validated architecture)
 
 | Area | State |
 | --- | --- |
 | `assembly.device`, `enclosure.fdm.box`, `enclosure.cutoutaperture` | implemented |
 | Typed Circuit JSON records (`source_assembly_device`, `source_fdm_enclosure`, `source_cutout_aperture`, `cad_fdm_enclosure`) | implemented |
 | Face-relative aperture placement on all six faces | implemented |
+| Separate insertion and aperture directions (`cutoutApertureDirection`) | implemented |
 | Aperture depth, and its derivation from a part's measured body | implemented |
 | One CAD record per printed part (`enclosure_part`) | implemented |
 | Canonical rendering through `circuit-json-to-gltf` and the 3D viewer | implemented |
-| STEP / 3MF / DXF outputs | not started |
-| Enclosure and assembly DRC | deferred by design (see below) |
-| Non-connector part-family inference beyond exact placement | partial |
+| Non-connector part-family inference beyond exact placement | implemented |
+| Enclosure and assembly DRC | not started |
+| STEP / 3MF / DXF outputs for enclosures | not started |
+| Non-FDM manufacturing processes | not started |
 
 ### Where enclosures plug into tscircuit
 
@@ -77,7 +81,8 @@ Enclosure authoring has two complementary root concepts:
    opening required to use that part.
 
 In addition, the multiple components of an enclosure and the PCB itself must
-be grouped together by declaring an Assembly.
+be grouped together by declaring an Assembly, which can later gain elements
+which specify and control the assembly process stages.
 
 ```tsx
 import { assembly, enclosure } from "@tscircuit/create-fdm-enclosure"
@@ -107,10 +112,6 @@ The enclosure specification answers **how the product is enclosed**. The
 cutout-aperture specification answers **what opening a particular part
 requires**. Aperture placement combines explicit part metadata with
 part-specific inference.
-
-Beyond the contracts listed under [Status](#status), the FDM box also generates
-PCB mounting posts or external corner fastening ears, visible BoM-able screws and
-bushings, and JSCAD-backed preview and STL output.
 
 ### Package layering
 
@@ -231,10 +232,7 @@ An enclosure opening is an inherent, part-owned mechanical requirement. A part
 that requires an opening declares an `<enclosure.cutoutaperture>` beside its
 footprint and CAD model.
 
-**Status: implemented**, including the face-relative placement contract that was
-previously carried as a separate proposal
-(`2026-07-24-enclosure-face-apertures.md`, now folded into this section). What
-remains open is listed under [Deferred](#deferred-aperture-work).
+**Status: implemented**, including the face-relative placement contract.
 
 ### Faces
 
@@ -251,17 +249,19 @@ A face is named by the axis its outward normal points along:
 
 Cartesian names replaced the compass names for two reasons, both of which had
 already caused defects. `front`/`back` named **opposite axes** in different
-packages and are retired ecosystem-wide. And `top` was overloaded three ways at
+renderers and are retired ecosystem-wide. And `top` was overloaded three ways at
 once: as an `EnclosureFace` it meant **+Z**, as an insertion direction
 (`from_top`) it means **+Y**, and as a PCB layer it means the +Z *side*. Naming
 the axis outright removes both ambiguities and matches the published
 `InsertionDirectionCartesian` spelling (`from_x_pos`, …), which uses `_pos`/`_neg`
-because Circuit JSON enum values must be snake_case.
+because Circuit JSON enum values must be snake_case. Note that "top" and "bottom"
+still refer to the +Y/-Y direction with respect to the 2D orientation of the PCB,
+as well as the "top" and "bottom" PCB layer.
 
-Core's `BoardWall` uses the same six names, so converting a board wall to an
-enclosure face is an identity rather than a lookup table. That is the point:
-core once swapped the +Y and −Y walls in that conversion to compensate for a
-renderer bug, and an identity leaves nowhere for such a flip to hide.
+Core's `BoardWall` uses the same six cartesian names, so converting a board wall
+to an enclosure face is an identity rather than a lookup table. That is the point:
+core once swapped the +Y and −Y walls in that conversion to compensate for
+renderer behavior, but it didn't match the other renderer behavior, causing confusion
 
 `boardSide` is deliberately **not** renamed. It names the PCB layer a part is
 mounted on — a side, not a direction — so it stays `"top"`/`"bottom"`.
@@ -319,6 +319,44 @@ Every branch may carry `margin` (extra clearance on every edge),
 Numbers use the project default unit; explicit distance strings such as
 `"3.66mm"` and `"0.1in"` may be mixed.
 
+### Which face an opening pierces
+
+The face is not authored on the aperture. It is resolved from a direction
+declared on the part's `<footprint />`, transformed for the component's rotation
+and mounting layer, so it names the face the part is actually reached from —
+rotating a part carries its opening around with it.
+
+Two directions exist because a part can be *installed* one way and *interacted
+with* another:
+
+| Footprint prop | Names |
+| --- | --- |
+| `insertionDirection` | the side a cable or mating part attaches from |
+| `cutoutApertureDirection` | the side the part's enclosure opening faces |
+
+In precedence order: `cutoutApertureDirection`, else `insertionDirection`, else
+the nearest reachable board edge, which is a guess and the only step that is.
+
+Most parts need only the first fallback: a cable arrives through the opening it
+needs, so the two directions coincide for every connector. They come apart on a
+part that is not entered at all — a side-actuated switch is pressed into the
+board from above and actuated sideways, so its opening pierces a wall while
+nothing is ever inserted into it. Overloading `insertionDirection` for that would
+have been a false statement, not just an imprecise one: it is defined as the side
+exposing the receptacle a mating part attaches to, and is read as such by
+connector checks.
+
+Both share one vocabulary, one frame, and one transform. They are properties of
+the part, authored in its unrotated frame, and reported in board coordinates on
+`pcb_component.insertion_direction` and
+`pcb_component.cutout_aperture_direction`. Deriving them separately is how the
+two would drift apart on a rotated or bottom-mounted part.
+
+`from_above` and `from_below` resolve to the lid and the floor rather than a
+wall; a layer flip is a 180-degree rotation about the board's Y axis, so a part
+authored `from_above` reports `from_below` once mounted on the bottom layer, and
+its opening moves from the lid to the floor without anything being re-declared.
+
 ### Placement across the face
 
 An aperture supplies `face` plus `center`, an interaction point in **board
@@ -328,9 +366,9 @@ opening, and the coordinate along the face normal is discarded. Callers never
 decide which axis matters.
 
 `widthDimensionOffset` and `heightDimensionOffset` then move the opening's centre
-across the face that the aperture cuts, along the same two axes its `width` and
-`height` are measured in for the aperture itself. Both may be positive or negative
-to offset on the cartesian axis.
+across the face that the aperture cuts relative to the detected part's rotation,
+along the same two axes its `width` and `height` of the aperture are measured in
+for the part. Both may be positive or negative to offset on the cartesian axis.
 
 Zero means *wherever the part puts it*, which is usually right or close to right,
 requiring only a small amount of manual nudging in coordinate directions that
@@ -340,34 +378,17 @@ should make sense to a human or an agent.
 
 `depth` is the opening's size along the face normal — how deep the part is, in
 the direction it pokes through. The cut is projected that far inboard, so nothing
-behind the face (the lid lip today, mounting bosses later) is left obstructing a
-part that reaches past the wall.
+behind the face (the lid lip today, mounting bosses and other internal structures
+later) is left obstructing a part that reaches past the wall.
 
-Because it is the face-normal dimension, what it cuts is whatever material lies
-along that normal, including enclosure parts other than the face it entered.
-A large `z_pos` opening in a corner is bounded in X and Y by `width` and `height`,
-and its depth cuts the side walls it overlaps - this allows us to cut pockets
-into lip, top, and other walls in order to accommodate parts near the board corner 
-that would otherwise collide with the inside of the case.
-
-**An authored depth is rendered as authored, on every face.** Nothing is capped to
-the cavity: a deep enough opening reaches the shell on the far side and cuts it
-too. This is deliberate in order to avoid collisions.
-
-When `depth` is not authored, an adapter may instead supply `componentBody`: the
+When `depth` is not authored, we measure the extents of `componentBody`: the
 part's authored body `size` in its own frame, the `rotation` it is placed at, the
 board-frame `footprint` it occupies, and `aboveBoardHeight`, how far it reaches
 above the board. This package projects that envelope onto the face normal and
-uses the result, taking the footprint as a floor since pad fans and courtyards can
-reach further inboard than the body itself.
-
-The projection is one scalar: it sets how deep the opening travels, **not** how
-wide or tall it is. Those still come from the aperture's own
-`width`/`height`/`radius`, so a body wider than its aperture is not relieved. Full
-body-envelope clearance — subtracting the whole part from the shell so nothing
-fouls it — is a separate and still unimplemented concern. However, we have added
-the model bounds relative to the board so we can implement bounding box collision
-checking.
+uses the result, taking the footprint as a floor. This prevents collision of the
+part's cutout aperture with internal structures of the enclosure, such as the lip,
+if depth is not authored. This `componentBody` data will also be used in the future
+for collision checking.
 
 ### Reusable defaults and caller replacement
 
@@ -406,20 +427,22 @@ shape branch (`rect`/`pill` with `width`/`height`, `circle` with `radius`). The
 face-relative meaning of every dimension is documented on the record itself,
 since it is a semantic definition rather than a detail of one solver.
 
-`z_extent_above_board` is **not** part of the contract. It was replaced before
-release rather than deprecated after — the whole reason the placement fields were
-settled while the schema was still a draft.
+`z_extent_above_board`/`centerZ` is **not** part of the contract. It was replaced
+before release rather than deprecated after. These design decisions are a matter
+of taste and feedback is expected here.
 
 `cad_fdm_enclosure` carries `enclosure_part` (`"base" | "lid"`, extensible to
 fasteners and inserts), one record per printed part rather than one per
-enclosure. Parts are made, handled and inspected separately, and the first thing
-anyone does with an enclosure on screen is hide the lid to see the board inside —
-impossible if the two arrive fused into one plan.
+enclosure. Parts are made and assembled separately, and the first thing
+anyone does with an enclosure on screen is make transparent or invisible the lid
+to see the board inside — impossible if the two arrive fused into one plan.
+3d-viewer and poppygl render enclosures as transparent by default.
 
 Deliberately absent from both records: any indication of how a part should be
 *shown*. Translucency was briefly a schema field and is now a viewer setting, per
-part and at runtime. It changes no geometry and no export, so it never belonged in
-the artifact manufacturing reads.
+part and at runtime. It changes no geometry and no export, it is purely a property
+of the display of the part, so it doesn't belong as durable data in the artifact
+specifying the physical design of the device.
 
 ### Non-connector placement: planned design
 
@@ -441,9 +464,12 @@ should remain focused on connectors.
 
 ### Deferred aperture work
 
-- **An explicit `face` prop**, for openings whose direction cannot be inferred
-  from the part. Everything shipped so far resolves from insertion direction and
-  mounting layer, which is why this has not been needed.
+- **An explicit `face` prop.** The case that motivated one — a part whose
+  opening does not face the way the part is entered — is served by
+  `cutoutApertureDirection` instead, and better: a direction is authored in the
+  part's own frame and rotates with it, while a face is an enclosure-frame
+  absolute that a part cannot know. What remains unserved is a *caller* override
+  for one board, which no shipped part has needed.
 - **Component-local off-centre apertures.** A part whose opening is off-centre in
   its own footprint (an asymmetric display window) needs an offset that follows
   the part's rotation *and* is authored by the part, not the caller. The current
