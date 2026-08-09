@@ -41,7 +41,7 @@ implementation, we need to rewrite them to our validated architecture)
 | Aperture depth, and its derivation from a part's measured body | implemented |
 | One CAD record per printed part (`enclosure_part`) | implemented |
 | Canonical rendering through `circuit-json-to-gltf` and the 3D viewer | implemented |
-| Non-connector part-family inference beyond exact placement | implemented |
+| Non-connector part-family inference beyond exact placement | not started |
 | Enclosure and assembly DRC | not started |
 | STEP / 3MF / DXF outputs for enclosures | not started |
 | Non-FDM manufacturing processes | not started |
@@ -82,7 +82,7 @@ be grouped together by declaring an Assembly, which can later gain elements
 which specify and control the assembly process stages.
 
 ```tsx
-import { assembly, enclosure } from "@tscircuit/create-fdm-enclosure"
+import { assembly, enclosure } from "tscircuit"
 
 export const UsbC = (props) => (
   <connector {...props}>
@@ -120,7 +120,7 @@ the generic layers are kept strictly separate from the process-specific one:
 | --- | --- | --- |
 | `lib/assembly/` | assembly-generic: the board/standoff/seam frame every process shares | nothing below it |
 | `lib/enclosure/` | enclosure-generic: faces, component-body envelopes, resolved placements | `lib/assembly/` |
-| `lib/aperture/` | aperture input validation, dimensions, layout, reference datum | `lib/enclosure/` `lib/assembly` |
+| `lib/apertures/` | aperture input validation, dimensions, layout, reference datum | `lib/enclosure/`, `lib/assembly/` |
 | `lib/fdm/` | FDM-specific: shells, lips, cutout plans, design rules | all of the above |
 
 The dependency direction is enforced by the modules themselves, not by
@@ -151,8 +151,9 @@ enclosureProps.cutoutaperture
 
 Those values validate props; they are not renderable React components. The
 renderable lowercase `assembly` and `enclosure` namespaces are exported by
-`@tscircuit/create-fdm-enclosure`, and the host elements they resolve to are
-registered in `core`.
+`tscircuit` (and by `@tscircuit/core` at the lower-level package boundary). The
+host elements they resolve to are registered in core; the geometry-only
+`@tscircuit/create-fdm-enclosure` package exports the solver, not React elements.
 
 `<assembly.device>` is the product-level root. It gives the physical product an
 identity and contains the board, enclosure, and later assembly occurrences,
@@ -164,7 +165,7 @@ selects its board through the required `boardRef`. It is not owned by or nested
 inside the board.
 
 ```tsx
-import { assembly, enclosure } from "@tscircuit/create-fdm-enclosure"
+import { assembly, enclosure } from "tscircuit"
 
 export default () => (
   <assembly.device name="controller">
@@ -196,7 +197,7 @@ implementation additionally exercises:
 | `lidThickness` | Lid top-plate thickness. |
 | `boardClearance` | XY gap from PCB edge to the inner wall. |
 | `standoffHeight` | Gap from floor top to PCB bottom, where the board is supported by standoffs. |
-| `topHeadroom` | (optional) Enclosure clearance above the board; If not specified, auto-detected from the tallest component. |
+| `topHeadroom` | Empty distance from the PCB top surface to the lid interior. Omitted, aperture-owning parts may grow the box; arbitrary tall parts are not inferred. |
 | `lidLipDepth` | Depth of the friction-fit lid lip. |
 | `disableCutouts` | Disable placement of apertures declared by parts. |
 
@@ -501,7 +502,7 @@ and identity; its process and manufacturing semantics remain planned, and may
 look something like this:
 
 ```tsx
-import { assembly, enclosure } from "@tscircuit/create-fdm-enclosure"
+import { assembly, enclosure } from "tscircuit"
 
 <assembly.device name="controller">
   <board name="B1">...</board>
@@ -613,7 +614,7 @@ Assembly and enclosure development follow React Strict DOM-like imported
 namespaces:
 
 ```tsx
-import { assembly, enclosure } from "@tscircuit/create-fdm-enclosure"
+import { assembly, enclosure } from "tscircuit"
 
 <assembly.device>
   <board name="B1" />
@@ -718,12 +719,12 @@ APIs must not repeat the `rotated_rect`/`rotated_pill` discriminant pattern.
 
 ### Distribution
 
-`@tscircuit/create-fdm-enclosure` is the distribution home while the API
-incubates, exporting both `assembly` and `enclosure` alongside the FDM solver.
-The internal layering described under [Package
-layering](#package-layering) is what allows `assembly`, and a
-process-generic enclosure layer, to move to their own packages later without
-rewriting either.
+`@tscircuit/create-fdm-enclosure` is the distribution home for the geometry
+solver while the API incubates. Renderable `assembly` and `enclosure` namespaces
+are exported by `tscircuit`/core, where host elements and render phases live. The
+internal layering described under [Package layering](#package-layering) is what
+allows assembly-generic and process-generic enclosure geometry to move to their
+own packages later without rewriting either.
 
 Projects importing these namespaces append canonical CAD records using existing
 Circuit JSON shapes. Projects that do not import them continue producing the
