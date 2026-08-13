@@ -32,8 +32,8 @@ The authoring props, staged two-part solver, compatibility Core integration and
 ordinary `cad_component` for each base/lid plan, sharing a synthetic PCB owner.
 The durable typed Circuit JSON path remains deliberately deferred; its draft
 schemas and renderers are architectural follow-ups, not released behavior.
-Mounting hardware and design rules are next (they existed in the reference
-implementation and need to be rewritten against the validated architecture).
+Manufacturing design rules are next. Mounting hardware and broader physical
+assembly semantics are intentionally left to a separate RFC.
 
 | Area | State |
 | --- | --- |
@@ -81,9 +81,9 @@ Enclosure authoring has two complementary root concepts:
    and CAD model. It explicitly declares the size and shape of an enclosure
    opening required to use that part.
 
-In addition, the multiple components of an enclosure and the PCB itself must
-be grouped together by declaring an Assembly, which can later gain elements
-which specify and control the assembly process stages.
+The enclosure and PCB are grouped under the current `assembly.device`
+compatibility container. Broader product grouping, fasteners, and assembly
+processes are outside this RFC.
 
 ```tsx
 import { assembly, enclosure } from "tscircuit"
@@ -283,9 +283,10 @@ An aperture does not begin in the frame of an enclosure face. It begins with the
 part: `cutoutApertureDirection` (or the `insertionDirection` fallback) defines
 the aperture's primary axis in the footprint's local frame. Core applies the
 same rotation and layer transform used by the footprint geometry, producing a
-continuous unit direction in board space. The axis passes through the
-component's rotation datum, `pcb_component.center`, so the aperture and CAD body
-remain on the same line as the component rotates.
+continuous unit direction in board space. In board XY the axis passes through
+`pcb_component.center`, so it remains on the same line as the component rotates.
+For a side opening, its Z datum is the center of the model's measured
+above-board extent; that complete three-dimensional datum is defined below.
 
 The named direction emitted on `pcb_component` is the Cartesian quantization of
 that same vector. It is useful as an initial face and an exact-corner tie-breaker,
@@ -311,8 +312,8 @@ axis is square to a face, this reduces to the familiar Cartesian table:
 | `y_pos`, `y_neg` | X | Z | Y |
 | `z_pos`, `z_neg` | transformed footprint X | transformed footprint Y | Z |
 
-The enclosure solver casts the transformed axis from the component datum and
-selects the first enclosure wall that ray intersects. The physical face
+The enclosure solver casts the transformed axis from the part datum described
+below and selects the first enclosure wall that ray intersects. The physical face
 transition therefore occurs where the axis crosses a box corner, which depends
 on both component position and rotation; it does not necessarily occur at 45
 degrees. The resolved face supplies the material plane and thickness, not the
@@ -354,9 +355,10 @@ Numbers use the project default unit; explicit distance strings such as
 The face is not authored on the aperture. A direction declared on the part's
 `<footprint />` defines a continuous component-relative axis, transformed for
 the component's rotation and mounting layer. For a side opening, the resolved
-face is the first enclosure wall intersected by that axis from the component's
-rotation datum. Rotating or moving a part therefore carries both the axis and
-its wall intersection with it.
+face is the first enclosure wall intersected by that axis from the part's datum:
+the component center in board XY and the center of the model's measured
+above-board extent in Z. Rotating or moving a part therefore carries both the
+axis and its wall intersection with it.
 
 Two directions exist because only connectors support insertionDirection.
 
@@ -375,42 +377,83 @@ would have been incorrect and confusing, so cutoutApertureDirection was added.
 
 Both share one vocabulary, one footprint-local frame, and one transform. They
 are properties of the part, authored in its unrotated frame. Core retains the
-continuous transformed vector for physical placement and reports its quantized
-board-space name on `pcb_component.insertion_direction` or
-`pcb_component.cutout_aperture_direction`. Deriving the vector and name
-separately is how face selection and tool orientation would drift apart on a
-rotated or bottom-mounted part.
+continuous transformed aperture vector internally for physical placement. The
+compatibility representation continues emitting only the existing
+`pcb_component.insertion_direction`; a durable
+`pcb_component.cutout_aperture_direction` remains deferred with the typed
+Circuit JSON work. Deriving the physical vector from the same transform as the
+footprint geometry prevents face selection and tool orientation from drifting
+apart on a rotated or bottom-mounted part.
 
 `from_above` and `from_below` resolve to the lid and the floor rather than a
 wall; a layer flip is a 180-degree rotation about the board's Y axis, so a part
 authored `from_above` reports `from_below` once mounted on the bottom layer, and
 its opening moves from the lid to the floor without anything being re-declared.
 
-### Axis datum and wall intersection
+### Aperture datum, offsets, and wall intersection
 
-For a directed side aperture, core supplies a point on the axis in **board
-coordinates relative to the board center** plus the continuous board-space
-direction. The point is `pcb_component.center`, the same stable datum the CAD
-body rotates around. The enclosure layer intersects that ray with the first wall
-of the resolved enclosure. It must not use `cable_insertion_center` as the
-rotation datum: that point is inferred from a quantized side of an axis-aligned
-bounding box, so it moves discontinuously when the named direction changes near
-a corner.
+The unoffset datum for a side aperture is the **above-board center of the
+model**:
+
+- in board XY, `pcb_component.center`, the stable point the component rotates
+  around; and
+- in Z, halfway through the model's measured extent above its mounting surface.
+
+This is why Core needs the CAD model extents. `modelBounds`,
+`modelOriginPosition`, the model's board-normal direction, and its emitted Z
+position reveal how much of the model is actually above the board. A size alone
+cannot place the body relative to the mounting surface and may include pins or a
+shell below the board. If measured bounds are unavailable, the fallback puts
+the aperture half its own height above the mounting surface so its lower edge
+rests on the board.
+
+For a directed side aperture, Core supplies that datum in board-centred
+coordinates plus the continuous board-space direction. The enclosure layer
+casts the ray from it and uses the point where it first intersects a wall as the
+zero-offset opening center. It must not use `cable_insertion_center`: that point
+is inferred from a quantized side of an axis-aligned bounding box and moves
+discontinuously when the named direction changes near a corner.
+
+`widthDimensionOffset` and `heightDimensionOffset` are signed corrections from
+that zero-offset center, not offsets from the board origin or enclosure center:
+
+- on a side wall, `widthDimensionOffset` moves along the wall in the aperture's
+  width direction, while `heightDimensionOffset` moves along board Z, outward
+  from the part's mounting surface; and
+- on the lid or floor, the unoffset XY datum is the component position and both
+  offsets rotate in-plane with the aperture profile.
+
+For example, these measured bounds place the model from the board surface to
+6 mm above it, so the unoffset opening center is 3 mm above the board.
+`heightDimensionOffset="-1mm"` lowers that center to 2 mm, while
+`widthDimensionOffset="2mm"` moves it 2 mm along the wall:
+
+```tsx
+<connector
+  footprint={<footprint cutoutApertureDirection="from_top" />}
+  cadModel={{
+    size: { x: 8, y: 4, z: 6 },
+    modelOriginPosition: { x: 0, y: 0, z: -3 },
+    modelBounds: {
+      min: { x: -4, y: -2, z: -3 },
+      max: { x: 4, y: 2, z: 3 },
+    },
+  }}
+>
+  <enclosure.cutoutaperture
+    shape="rect"
+    width="6mm"
+    height="3mm"
+    widthDimensionOffset="2mm"
+    heightDimensionOffset="-1mm"
+  />
+</connector>
+```
 
 Without an authored direction there is no physical ray to cast. The
 nearest-board-edge fallback supplies a face and interaction point, and the
-opening is projected square to that face as before. Lid and floor apertures use
-the component position directly and rotate their profile in the board plane.
-
-`widthDimensionOffset` and `heightDimensionOffset` remain placement corrections.
-On a side face they move the resolved wall intersection along the wall and board
-Z; on a lid or floor they rotate in-plane with the aperture profile. Both may be
-positive or negative. They should not be overloaded to describe an opening that
-is intrinsically off-centre in a reusable part's footprint; that requires the
-component-local offset field deferred below.
-
-Zero means the aperture lies on the resolved component axis, which is the exact
-default for a centred connector or actuator.
+opening is projected square to that face. Zero offsets preserve the datum above,
+which is the expected default for a centred connector or actuator.
 
 ### Depth: the third aperture dimension
 
@@ -476,7 +519,7 @@ before release rather than deprecated after. These design decisions are a matter
 of taste and feedback is expected here.
 
 The proposed `cad_fdm_enclosure` carries `enclosure_part` (`"base" | "lid"`,
-extensible to fasteners and inserts), one record per printed part rather than
+extensible to additional enclosure parts), one record per printed part rather than
 one per enclosure. Parts are made and assembled separately, and a durable role
 will eventually let a viewer hide the lid without losing the base.
 
@@ -490,131 +533,16 @@ any indication of how a part should be *shown*. Translucency is viewer state at
 runtime. It changes no geometry and no export, so it does not belong as durable
 data in the artifact specifying the physical design of the device.
 
-## Mounting Hardware and Assembly
+## Assembly scope
 
-Board holes will be extended with a property similar to cutout aperture which
-will select them as a mounting hole, and potentially define their mounting hardware
-(this is TBD; mounting hardware may be specified at enclosure and/or assembly level)
+This RFC uses `assembly.device` only as the current product-level container for
+the board and enclosure. It does not propose assembly steps, process XML, an
+MBOM/BOP model, tools, work instructions, or assembly-state DRC.
 
-Required mounting hardware such as screws, nuts, spacers, and heat-set bushings will
-be selected from a catalog and added to the BOM.
-
-### Assembly Device and Physical Assembly
-
-Assembly process (steps, ordering, etc) will be specified or derived by the
-assembly module. The assembly solver will implement DRC that performs
-insertion-path and clearance checks, and validates that the product is actually
-buildable as designed.
-
-An enclosure manufactures the case parts; it does not by itself describe how to
-assemble the finished device. `assembly.device` supplies the product-level root
-and identity; its process and manufacturing semantics remain planned, and may
-look something like this:
-
-```tsx
-import { assembly, enclosure } from "tscircuit"
-
-<assembly.device name="controller">
-  <board name="B1">...</board>
-  <enclosure.fdm.box boardRef=".B1" />
-  <assembly.harness name="display-fpc" />
-  <assembly.part name="display" />
-
-  <assembly.process>
-    <assembly.step id="install-inserts">
-      <assembly.install part=".heat-set-inserts" into=".case-base" />
-      <assembly.tool type="heat-set-press" temperature="220C" />
-    </assembly.step>
-
-    <assembly.step id="connect-display" after="install-inserts">
-      <assembly.connect from=".display-fpc" to=".B1 > .J3" />
-      <assembly.check type="minimum-bend-radius" value="5mm" />
-    </assembly.step>
-
-    <assembly.step id="close-case" after="connect-display">
-      <assembly.fastener part=".case-screws" torque="0.4N*m" />
-    </assembly.step>
-  </assembly.process>
-</assembly.device>
-```
-
-The process children are illustrative. Like `enclosure`, the assembly API
-incubates as an imported lowercase dotted namespace rather than a global
-intrinsic. It may move to a dedicated `@tscircuit/assembly` package after its
-product and process model stabilizes.
-
-### Product structure and process ownership
-
-The physical assembly combines:
-
-- the main board and any daughterboards;
-- generated enclosure parts;
-- displays and controls mounted independently of a PCB;
-- wiring harnesses, ribbon cables, antennas, and strain relief;
-- fasteners, inserts, clips, seals, labels, adhesives, and other purchased or
-  consumed items; and
-- the connections and final transforms among those occurrences.
-
-It owns the manufacturing view of the complete product:
-
-- an engineering/product structure and manufacturing BoM (MBOM);
-- an ordered or dependency-based Bill of Process (BOP);
-- allocation of parts and consumables to operations;
-- tools, fixtures, torque, temperature, cure time, and other parameters;
-- work instructions and intermediate-state checks; and
-- final-device assembly artifacts.
-
-The process should be a dependency graph rather than only an array: independent
-operations may occur in parallel, while closure or fastening operations depend
-on earlier installation and connection steps.
-
-### Assembly checks versus enclosure checks
-
-Enclosure checks are design-for-manufacturing rules for enclosure parts, such as
-FDM overhangs, CNC corner radii, laser kerf, and minimum walls.
-
-Physical-assembly checks are design-for-assembly rules over changing assembly
-states, including:
-
-- insertion and removal paths;
-- tool and hand access;
-- fastener reach and torque access;
-- connector accessibility at the step when a cable is attached;
-- cable routing and minimum bend radius;
-- whether an earlier operation blocks a later one;
-- whether the lid closes after harness installation; and
-- whether every MBOM occurrence is allocated to a process operation.
-
-This mirrors industrial manufacturing planning: CAD/product structure describes
-what the product is, while an MBOM and BOP describe what is consumed and how the
-product is assembled.
-
-### Why not `<group>` or the existing `<cadassembly>`?
-
-`<group>` is already an ECAD and layout abstraction. It can emit
-`source_group`, `pcb_group`, and `schematic_group` records; establish subcircuit
-and selector scope; expose ports and connections; apply schematic/PCB
-grid/flex/packing; and control routing rules and autorouters. A root group is
-automatically a subcircuit. Wrapping a board and enclosure in it therefore says
-they share electrical/layout scope, not merely that they belong to one physical
-product.
-
-Overloading `<group>` with assembly-process meaning would also make existing
-group behavior harder to reason about and still would not provide MBOM
-allocation, ordered operations, tools, harness connections, or intermediate
-assembly states.
-
-The existing `<cadassembly>` is narrower in the other direction. It is a
-component-local primitive container for composing multiple `<cadmodel>` children
-and carries `originalLayer` mirroring semantics. It emits no assembly record and
-applies no product-assembly or process-planning algorithms. Reusing its name for
-finished-device assembly would conflate CAD representation with real-world
-assembly and substantially change existing meaning.
-
-`assembly.device` is therefore the explicit product root. Its implementation is
-intentionally small — an identity record and a container — while later product
-structure, process, DRC, and export semantics attach to the same wrapper without
-overloading ECAD grouping.
+Mounting hardware and broader product structure need their own design. A
+separate RFC can define `assembly.group`, fasteners that reference mounting
+holes, and any process model without making enclosure geometry depend on those
+unsettled semantics.
 
 ## Development Standards
 
@@ -689,14 +617,6 @@ anchor, object fit)
 describe how to fit a *supplied part file* to a footprint; a generated plan is
 already authored in Circuit world coordinates, so `position` alone places it.
 
-Generated **hardware** — screws, inserts, washers, standoffs — is a different
-problem and is not solved by `cad_fdm_enclosure`, since a screw is not an FDM
-enclosure and its meaningful relationship is to the mount it occupies. Hardware
-therefore keeps the synthetic `source_component` + `pcb_component` +
-`cad_component` triple for now, excluded from placement, obstacle, and
-electrical-BOM analysis. See [Future proposal: physical hardware occurrence
-records](#future-proposal-physical-hardware-occurrence-records).
-
 Serialized JSCAD operation trees are an allowed Circuit JSON CAD
 representation. They are rendered by `circuit-json-to-gltf` and survive worker
 boundaries, cached build output, saved `circuit.json`, and static rendering.
@@ -743,42 +663,3 @@ own packages later without rewriting either.
 Projects importing these namespaces append canonical CAD records using existing
 Circuit JSON shapes. Projects that do not import them continue producing the
 existing electronics records unchanged.
-
-### Future proposal: physical hardware occurrence records
-
-`cad_fdm_enclosure` (proposed in circuit-json #649) would give generated
-enclosure *parts* a typed CAD record that does not need PCB ownership. Generated
-*hardware* has no such
-record, and cannot reuse that one: a screw, heat-set insert, washer, nut, or
-standoff is not an FDM enclosure, and the relationship it needs is to the mount
-it occupies, not to the enclosure request.
-
-So the synthetic `source_component` + `pcb_component` + `cad_component` triple
-survives for hardware even after enclosure parts stop using it. That is the
-larger half of the problem: one enclosure emits two part records, while the
-prefab reference emits five M3 supports plus corner ears, i.e. roughly a dozen
-mechanical occurrences that currently present as `simple_chip` PCB components and
-flow into electrical BOM interpretations.
-
-This is explicitly **not** in scope for the initial core/create-fdm migration. It
-is collected here so the enclosure-part work does not accidentally settle it.
-
-A future proposal should cover:
-
-- a physical-occurrence record with identity, parent/child product structure, and
-  an assembled transform, independent of any PCB;
-- procurement identity (manufacturer, supplier, MPN, generic-hardware flag) and a
-  stable BOM grouping key, so mechanical items group without an MPN;
-- attachment of CAD geometry to an occurrence rather than to a `pcb_component`;
-- the relationship from an occurrence to the mount, seam, or part it is installed
-  into, which is what assembly-process planning needs;
-- consumed/consumable items that have quantity but no single placement
-  (adhesive, thread locker, labels); and
-- an explicit statement of which BOM a mechanical occurrence appears in —
-  electrical, mechanical, or both.
-
-Until then, hardware keeps the compatibility triple and must remain excluded
-from placement and electrical-BOM analysis with explicit non-electrical
-semantics. This is related to, but not identical with, the current enclosure
-compatibility owner, whose resolved dimensions identify the assembled enclosure
-for viewers.
