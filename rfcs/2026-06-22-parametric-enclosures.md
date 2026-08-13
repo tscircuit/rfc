@@ -27,20 +27,24 @@ not reproduce board dimensions in a second design system.
 
 ## Status
 
-Basic enclosure and cutout are working with reasonable proposal for props,
-circuit-json, and core integration. Renderers are hooked up and tested. Mounting
-hardware and design rules are next (these were implemented in the reference
-implementation, we need to rewrite them to our validated architecture)
+The authoring props, staged two-part solver, compatibility Core integration and
+3D-viewer appearance control are working and tested. Core currently emits one
+ordinary `cad_component` for each base/lid plan, sharing a synthetic PCB owner.
+The durable typed Circuit JSON path remains deliberately deferred; its draft
+schemas and renderers are architectural follow-ups, not released behavior.
+Mounting hardware and design rules are next (they existed in the reference
+implementation and need to be rewritten against the validated architecture).
 
 | Area | State |
 | --- | --- |
-| `assembly.device`, `enclosure.fdm.box`, `enclosure.cutoutaperture` | implemented |
-| Typed Circuit JSON records (`source_assembly_device`, `source_fdm_enclosure`, `source_cutout_aperture`, `cad_fdm_enclosure`) | implemented |
-| Component-relative aperture axes and resolved intersections on all six faces | implemented |
-| Separate insertion and aperture directions (`cutoutApertureDirection`) | implemented |
+| `assembly.device`, `enclosure.fdm.box`, `enclosure.cutoutaperture` | implemented with a compatibility assembly container |
+| Typed Circuit JSON records (`source_assembly_device`, `source_fdm_enclosure`, `source_cutout_aperture`, `cad_fdm_enclosure`) | proposed in circuit-json #649; deferred |
+| Component-relative aperture axes and resolved intersections on all six faces | implemented; pending Core #3152 |
+| Separate insertion and aperture directions (`cutoutApertureDirection`) | Props released; Core consumption pending #3152 |
 | Aperture depth, and its derivation from a part's measured body | implemented |
-| One CAD record per printed part (`enclosure_part`) | implemented |
-| Canonical rendering through `circuit-json-to-gltf` and the 3D viewer | implemented |
+| Separate CAD record for each base/lid plan | implemented with ordinary `cad_component`; typed `enclosure_part` deferred |
+| 3D-viewer rendering and enclosure-wide appearance control | implemented through compatibility detection |
+| Typed rendering through `circuit-json-to-gltf` and per-part appearance controls | deferred with the typed records |
 | Non-connector part-family inference beyond exact placement | not started |
 | Enclosure and assembly DRC | not started |
 | STEP / 3MF / DXF outputs for enclosures | not started |
@@ -54,15 +58,15 @@ are:
 | Layer | Owns | Enclosure additions |
 | --- | --- | --- |
 | `@tscircuit/props` | React-independent Zod prop schemas | `assemblyProps.device`, `enclosureProps.fdm.box`, `enclosureProps.cutoutaperture` |
-| `circuit-json` | the interchange records everything else reads and writes | `source_assembly_device`, `source_fdm_enclosure`, `source_cutout_aperture`, `cad_fdm_enclosure` |
-| `core` | the renderer tree: `Renderable` components and their ordered render phases | `AssemblyDevice`, `EnclosureFdmBox`, `EnclosureCutoutAperture` host elements, and the emission of the records above |
+| `circuit-json` | the interchange records everything else reads and writes | proposed durable records: `source_assembly_device`, `source_fdm_enclosure`, `source_cutout_aperture`, `cad_fdm_enclosure` (deferred) |
+| `core` | the renderer tree: `Renderable` components and their ordered render phases | `AssemblyDevice`, `EnclosureFdmBox`, `EnclosureCutoutAperture` host elements; compatibility CAD emission now and typed records later |
 | `@tscircuit/create-fdm-enclosure` | geometry: a pure solver over plain data | the enclosure problem, its resolution, and the JSCAD plans |
 
 An enclosure is generated from the **rendered** board — component bodies,
 insertion directions, measured CAD bounds, resolved placements — so the elements
-belong in core's render phases, where those facts exist and are ordered. Core
-runs `EnclosureRender` after `CadModelRender` for exactly this reason: a
-`cad_component` must exist before an aperture can read the body behind it.
+belong in core's render phases, where those facts exist and are ordered. The
+compatibility implementation resolves the enclosure only after the relevant CAD
+components exist, because an aperture must be able to read the body behind it.
 The solver stays outside core for modularity and to support different
 manufacturing process outputs based on the same aperture geometry.
 
@@ -457,6 +461,10 @@ supply another complete child without callback or render-function props.
 
 ### Circuit JSON impact
 
+The durable records in this section describe the target interchange contract;
+they are still deferred. The shipped compatibility path intentionally uses
+existing `cad_component` records instead.
+
 `source_cutout_aperture` carries the placement vocabulary directly:
 `width_dimension_offset`, `height_dimension_offset`, `margin`, `depth`, and the
 shape branch (`rect`/`pill` with `width`/`height`, `circle` with `radius`). The
@@ -467,18 +475,20 @@ since it is a semantic definition rather than a detail of one solver.
 before release rather than deprecated after. These design decisions are a matter
 of taste and feedback is expected here.
 
-`cad_fdm_enclosure` carries `enclosure_part` (`"base" | "lid"`, extensible to
-fasteners and inserts), one record per printed part rather than one per
-enclosure. Parts are made and assembled separately, and the first thing
-anyone does with an enclosure on screen is make transparent or invisible the lid
-to see the board inside — impossible if the two arrive fused into one plan.
-3d-viewer and poppygl render enclosures as transparent by default.
+The proposed `cad_fdm_enclosure` carries `enclosure_part` (`"base" | "lid"`,
+extensible to fasteners and inserts), one record per printed part rather than
+one per enclosure. Parts are made and assembled separately, and a durable role
+will eventually let a viewer hide the lid without losing the base.
 
-Deliberately absent from both records: any indication of how a part should be
-*shown*. Translucency was briefly a schema field and is now a viewer setting, per
-part and at runtime. It changes no geometry and no export, it is purely a property
-of the display of the part, so it doesn't belong as durable data in the artifact
-specifying the physical design of the device.
+Until that record lands, Core emits separate base and lid `cad_component`
+records sharing one synthetic owner. The 3D viewer recognizes the owner and
+provides one enclosure-wide runtime setting that affects both parts together.
+Independent base/lid controls remain deferred with `enclosure_part`.
+
+Deliberately absent from both the proposed records and the compatibility records:
+any indication of how a part should be *shown*. Translucency is viewer state at
+runtime. It changes no geometry and no export, so it does not belong as durable
+data in the artifact specifying the physical design of the device.
 
 ## Mounting Hardware and Assembly
 
@@ -663,15 +673,19 @@ board/component Circuit JSON       imported assembly/enclosure TSX
               GLB / PoppyGL
 ```
 
-A generated enclosure part is a **typed record**: one `cad_fdm_enclosure` per
-printed part, carrying the serialized JSCAD plan, its `enclosure_part` role, and
-the position that places it. It has no PCB owner, because it is not on the PCB.
+In the target durable schema, a generated enclosure part is a **typed record**:
+one `cad_fdm_enclosure` per printed part, carrying the serialized JSCAD plan,
+its `enclosure_part` role, and the position that places it. It has no PCB owner,
+because it is not on the PCB. The current compatibility representation remains
+separate base/lid `cad_component` records sharing one synthetic PCB owner.
 
 `cad_component` is the wrong record for it in two independent ways. It requires
-PCB ownership, which forces a zero-size `pcb_component` whose placement and
-obstruction semantics then have to be disabled by hand — a record existing only
-to satisfy a foreign key, which every consumer must learn to ignore. And its
-asset-normalization fields (model origin, board normal, anchor, object fit)
+PCB ownership, which forces a synthetic `pcb_component` whose placement and
+obstruction semantics have to be disabled by hand. The compatibility owner now
+carries resolved enclosure dimensions so viewers can identify the assembly, but
+it still exists to satisfy a foreign key rather than to represent a board part.
+And `cad_component`'s asset-normalization fields (model origin, board normal,
+anchor, object fit)
 describe how to fit a *supplied part file* to a footprint; a generated plan is
 already authored in Circuit world coordinates, so `position` alone places it.
 
@@ -732,8 +746,9 @@ existing electronics records unchanged.
 
 ### Future proposal: physical hardware occurrence records
 
-`cad_fdm_enclosure` (circuit-json #649) gives generated enclosure *parts* a typed
-CAD record that does not need PCB ownership. Generated *hardware* has no such
+`cad_fdm_enclosure` (proposed in circuit-json #649) would give generated
+enclosure *parts* a typed CAD record that does not need PCB ownership. Generated
+*hardware* has no such
 record, and cannot reuse that one: a screw, heat-set insert, washer, nut, or
 standoff is not an FDM enclosure, and the relationship it needs is to the mount
 it occupies, not to the enclosure request.
@@ -763,5 +778,7 @@ A future proposal should cover:
   electrical, mechanical, or both.
 
 Until then, hardware keeps the compatibility triple and must remain excluded
-from placement, obstacle, and electrical-BOM analysis by the same rules as
-enclosure parts: zero size, `do_not_place`, off-board-allowed, non-obstructing.
+from placement and electrical-BOM analysis with explicit non-electrical
+semantics. This is related to, but not identical with, the current enclosure
+compatibility owner, whose resolved dimensions identify the assembled enclosure
+for viewers.
