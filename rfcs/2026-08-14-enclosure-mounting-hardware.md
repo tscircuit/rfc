@@ -13,7 +13,7 @@ Proposed. Companion to *Parametric Enclosures*
 This is that RFC. It covers one authoring element (`enclosure.screwboss`), the
 hardware catalogue behind it, the geometry it contributes, and — the part with
 the largest blast radius — how a device's **manufacturing BOM** is represented
-without corrupting the board's electrical BOM.
+without interfering with the board's electrical BOM.
 
 | Area | State |
 | --- | --- |
@@ -23,7 +23,7 @@ without corrupting the board's electrical BOM.
 | Lid screw columns with countersink / counterbore head recesses | this RFC |
 | Hardware occurrences in the solver output | this RFC |
 | Durable Circuit JSON records for assembly parts | **proposed only, deliberately not implemented** |
-| `getPcbaBom` / `getEnclosureBom` / `getDeviceMbom` | proposed, blocked on the records |
+| `getPcbaBom` / `getEnclosureBom` / `getDeviceMbom` | proposed, blocked on the circuit-json records |
 | Fastener procurement engine (McMaster / Fastenal adapters) | proposed |
 | Cable, label, thermal-pad and packaging items | out of scope |
 
@@ -31,26 +31,20 @@ without corrupting the board's electrical BOM.
 
 ## Motivation
 
-A board in a box is held there by screws. Today tscircuit can generate the box
-and the openings in it, and then stops: there is no way to say "this mounting
-hole carries an M3 heat-set insert", no boss under the board, no lid screw, and
-no record of the eight pieces of hardware someone has to buy before the product
-exists.
-
-Mounting hardware is where the enclosure stops being a rendering and becomes a
-thing you assemble. It is also where a second, quite different bill of materials
-appears — one that goes to a different vendor, is identified differently, and is
-consumed by a different assembly step. Getting that representation right matters
-more than the geometry, because the geometry is local and the BOM is not.
+Creating the enclosure box and cutouts was the first step. Mounting hardware is 
+required to a assemble a device. It is also where a second, quite different bill
+of materials appears — one that goes to a different vendor, is identified differently,
+and is consumed by a different assembly step. Getting that representation right will
+not necessarily follow the current EBOM implementation.
 
 ---
 
 ## Part 1 — The device manufacturing BOM
 
-### 1.1 The mistake to avoid, measured
+### 1.1 Construction of current EBOM
 
 `circuit-json-to-bom-csv` is the only BOM producer in the ecosystem (runframe's
-BOM table and the CLI both call it), and it is forty lines:
+BOM table and the CLI both call it), and it is very simple:
 
 ```js
 for (const elm of circuitJson) {
@@ -62,7 +56,7 @@ for (const elm of circuitJson) {
 
 Three consequences, all load-bearing:
 
-1. **BOM membership is already structural, not a flag.** A record with no
+1. **EBOM membership is already structural, not a flag.** A record with no
    `pcb_component` cannot appear. The existing BOM is *the PCBA BOM by
    construction*.
 2. **Identity is `source_component`'s**: designator, MPN, supplier part numbers,
@@ -70,7 +64,7 @@ Three consequences, all load-bearing:
 3. **One row per occurrence.** Quantity is implicit; grouping is a downstream
    rendering concern.
 
-We are already violating (1). Rendering a board with one resistor plus an
+Enclosures are already violating (1). Rendering a board with one resistor plus an
 `<enclosure.fdm.box name="EN1">` and running the real converter over the output
 gives:
 
@@ -81,36 +75,59 @@ gives:
 
 The enclosure is quoted to the board assembler as a line item, because
 `cad_component` requires both `pcb_component_id` and `source_component_id`, so
-generated CAD forces a synthetic PCB owner into existence. The reference
-implementation extends the same pattern to hardware — a
-`source_component`/`pcb_component`/`cad_component` triple per screw and per
-insert — which for its five-mount example would add **ten** rows of parts the
-board house cannot place.
+generated CAD forces a synthetic PCB component into existence to own the enclosure.
+This is wrong because the enclosure is not required to assemble the board,
+and should not be part of the EBOM sent to the board manufacturer/pick-n-place.
 
-Mounting hardware makes this urgent, but note it is not caused by mounting
-hardware. It is caused by CAD ownership, and it is fixed separately.
+Mounting hardware also does not belong in the EBOM; therefore we propose a hierarchical
+BOM where the PCB owns the EBOM as it does today, and the assembly.device owns all
+components required to assemble the device: the enclosure parts, and all mounting hardware.
 
 ### 1.2 There is no "second BOM per part"
 
-The framing to discard is that a part belongs to several BOMs and needs a
-discriminator saying which. A BOM belongs to an **assembly** and lists what that
+A BOM should belong to an **assembly** and lists what that
 assembly consumes; a part appears in exactly one. This is the ordinary
 item-master/structure model, and the reason a screw is absent from the board's
-BOM is not that it is "mechanical" — it is that *the board assembly does not
+BOM is not that it is "mechanical" -- it is that *the board assembly does not
 consume it*:
 
 ```
-device "controller"                     ← MBOM        → box-build / final assembly
-├── PCBA "B1"             ×1            ← one line; its BOM is the EBOM → JLCPCB
-├── enclosure base        ×1   MAKE     ← FDM, PLA, base.stl  → print farm
-├── enclosure lid         ×1   MAKE
-├── M3 heat-set insert    ×4   BUY
-└── M3×8 socket cap screw ×4   BUY
+device "controller"                            <- final assembly
+|-- PCBA "B1"                    x1            <- subassembly  -> JLCPCB
+|   |-- R1  10k 0402             x1               (the EBOM: pcb_components)
+|   `-- ...
+|-- enclosure "EN1"              x1            <- subassembly  -> print farm
+|   |-- base                     x1   MAKE        FDM, PLA, base.stl
+|   |-- lid                      x1   MAKE
+|   |-- M3 heat-set insert       x8   BUY
+|   `-- M3x8 countersunk screw   x8   BUY
+`-- ribbon cable, 10-way, 100mm  x1   BUY      <- device-level: belongs to no
+                                                  subassembly
 ```
+
+Three levels, not two, and the middle one is load-bearing. An earlier draft of
+this RFC drew the enclosure's parts as siblings of the PCBA at the device level
+and made the enclosure a nullable *attribute* of each part -- which contradicts
+the principle in the first sentence of this section. The enclosure is an
+assembly by every test that matters: it is built as a unit, by a vendor who
+never sees the board, from a bill you can order on its own.
 
 Each assembly's BOM goes to the vendor that builds that assembly. That is the
 user-visible distinction we want, and it falls out of the structure rather than
 being asserted by a field.
+
+**Which node owns a part: whatever generates the requirement.** The screws are
+worth stating explicitly, because sequencing puts them somewhere else. Ordered by
+operation, the inserts are pressed into the base before anything else -- an
+enclosure operation -- while the screws are driven only once the board is in the
+box, which is a final-assembly operation, so an operation-accurate MBOM would
+hang the screws off the *device*. They go under the enclosure anyway: they exist
+because the enclosure has bosses, they are specified by the enclosure design,
+they are ordered with the rest of the box hardware, and deleting the enclosure
+deletes them. **Structure by what generates the requirement; sequence by the bill
+of process** -- and there is no bill of process, because the parametric-enclosures
+RFC puts assembly steps out of scope. If one ever lands, that is the moment to
+split these, and this paragraph is why such a split would not be a bug fix.
 
 ### 1.3 Hardware is identified by specification, not by MPN
 
@@ -151,7 +168,7 @@ it is **a member item of an assembly device that is not on the board** — not
 that it was made by FDM. A record per manufacturing process (`cad_fdm_enclosure`,
 and a `cad_cnc_enclosure` behind it, and a `cad_sheet_metal_enclosure` behind
 that) would encode a process taxonomy into the interchange format that the
-authoring namespace is explicitly not yet willing to commit to. So the process
+authoring namespace should not need to commit to. So the process
 becomes a **field**, not a record type:
 
 ```ts
@@ -166,19 +183,27 @@ interface SourceAssemblyDevice {
 interface SourceEnclosure {
   type: "source_enclosure"
   source_enclosure_id: string
+  /** Membership: this enclosure is a subassembly of that device. */
   source_assembly_device_id: string
   name: string
   /** How it is produced. Extensible; not a closed taxonomy. */
   manufacturing_process: "fdm" | string
   /** How it comes apart. Extensible. */
   construction: "box" | string
-  /** The board it encloses. */
-  pcb_board_id?: string
+  /**
+   * Geometry reference: the board(s) this enclosure is built around.
+   *
+   * Deliberately NOT the membership edge, which is why it can become a list for
+   * a multi-board enclosure without disturbing the assembly tree. A board is a
+   * subassembly of the *device*, not of the enclosure — the enclosure is built
+   * and shipped without a board in it.
+   */
+  pcb_board_ids: string[]
 }
 
 /**
- * One physical member item of an assembly device that is not on the board:
- * a printed shell, a screw, an insert, a washer, a label, a cable.
+ * One physical member item consumed by an assembly: a printed shell, a screw,
+ * an insert, a washer, a label, a ribbon cable.
  *
  * One record per physical piece — quantity is grouping, exactly as the PCBA BOM
  * derives quantity from occurrences today.
@@ -186,14 +211,26 @@ interface SourceEnclosure {
 interface AssemblyPart {
   type: "assembly_part"
   assembly_part_id: string
-  source_assembly_device_id: string
-  /** Which subassembly consumes it; what getEnclosureBom filters on. */
-  source_enclosure_id?: string
+
+  /**
+   * The assembly that consumes it. Exactly one, and the only edge that decides
+   * which BOM the part appears in.
+   *
+   * Discriminated rather than a bare id because expanding a node is
+   * polymorphic — a board expands to its `pcb_component`s, an enclosure to its
+   * `assembly_part`s — so a generic walk has to know what kind of node it is
+   * standing on. A third kind (a cable harness, a daughterboard module with its
+   * own sub-parts) is then a new enum value, not a new field.
+   */
+  parent_assembly_type: "assembly_device" | "enclosure"
+  parent_assembly_id: string
 
   name: string                       // "EN1.base", "EN1.H1.screw"
   /** The make/buy axis every MBOM has. */
   supply_method: "fabricated" | "purchased"
-  part_category: "enclosure_shell" | "screw" | "insert" | "washer" | "nut" | "spacer" | string
+  part_category:
+    | "enclosure_shell" | "screw" | "insert" | "washer" | "nut" | "spacer"
+    | "cable" | string
 
   /** Specification identity. Groups BOM lines when no MPN exists. */
   designation?: string               // "ISO 4762 M3x0.5x8 A2-70"
@@ -215,6 +252,36 @@ interface AssemblyPart {
 }
 ```
 
+### 1.5.1 Two kinds of edge, and only one new record
+
+An assembly tree has two kinds of edge, and they are not expressed the same way:
+
+| Edge | Meaning | Expressed as |
+| --- | --- | --- |
+| assembly contains **subassembly** | the device contains this enclosure, and this board | a parent pointer on the *node* record: `source_enclosure.source_assembly_device_id`, plus a new `pcb_board.source_assembly_device_id` |
+| assembly consumes **item** | this enclosure consumes 8 screws | one `assembly_part` per piece, carrying its parent |
+
+So the structure costs one new relationship on an existing record — `pcb_board`
+gains an optional device pointer, since nothing links a board to the device that
+contains it today — and the parent on `assembly_part`. The PCBA line in the
+device MBOM is then *derived* from the board node being under the device, rather
+than being a second record that could drift out of agreement with the board it
+names.
+
+This is also the answer to daughterboards, ribbon cables, and anything else that
+belongs to the device but not to the enclosure: they are `assembly_part`s whose
+parent is the **device**, or — when they have internal structure worth expanding —
+a further node kind with parts beneath them. Nothing about the enclosure is
+privileged in the shape; it is simply the first subassembly we generate.
+
+**The honest gap:** that third bucket is *representable* but not yet
+*authorable*. No TSX element produces a device-level part, so a ribbon cable can
+be modelled but not declared. Filling it means an authoring element for hardware
+nobody generates (`assembly.part`, or similar), which this RFC does not propose —
+the enclosure generates its own parts, and designing a manual-entry element
+beside it would be building for a use case nobody has exercised. It is named here
+so the shape is checked against it now rather than surprised by it later.
+
 `assembly_part` carries its own geometry rather than borrowing `cad_component`,
 for the reason the parametric-enclosures RFC already gives: `cad_component`'s
 asset-normalization fields (`model_origin_alignment`,
@@ -231,20 +298,30 @@ intent yet. Part-owned intent records (`source_cutout_aperture` and a
 hypothetical `source_enclosure_mount`) are a separate question that the
 parametric-enclosures RFC already owns; nothing here is blocked on it.
 
-### 1.6 Three BOM queries
+### 1.6 Three BOM queries, one walk
 
-With those records, BOM views are queries over the structure rather than
-separate documents. Proposed for `@tscircuit/circuit-json-util`:
+With those records a BOM view is a **subtree**, not a filtered list. Proposed for
+`@tscircuit/circuit-json-util`:
 
-| Function | Emits | Goes to |
-| --- | --- | --- |
-| `getPcbaBom(circuitJson)` | board components only — exactly what `circuit-json-to-bom-csv` produces today | the board assembler |
-| `getEnclosureBom(circuitJson, { enclosureName? })` | one enclosure's tree: its fabricated shells and the hardware consumed to mount and close it | the print farm + the fastener supplier |
-| `getDeviceMbom(circuitJson)` | the whole product: the PCBA as **one subassembly line**, plus every enclosure tree, plus device-level items | the final-assembly vendor |
+| Function | Node it is rooted at | Emits | Goes to |
+| --- | --- | --- | --- |
+| `getPcbaBom(circuitJson, { boardName? })` | a `pcb_board` | its `pcb_component`s — exactly what `circuit-json-to-bom-csv` produces today | the board assembler |
+| `getEnclosureBom(circuitJson, { enclosureName? })` | a `source_enclosure` | its fabricated shells and the hardware consumed to mount and close it | the print farm and the fastener supplier |
+| `getDeviceMbom(circuitJson)` | the `source_assembly_device` | each child node as **one line**, expandable to that node's own BOM, plus the device-level parts | final assembly |
+
+The three are one recursive walk with a per-node-kind expansion, not three
+bespoke queries — which is the practical reason §1.5's parent reference carries
+the node kind. `getEnclosureBom` is `getDeviceMbom` rooted lower; adding a fourth
+node kind adds an expansion, not a function.
 
 `getDeviceMbom` emitting the PCBA as a single line is what makes it a real
-product MBOM: the box-build vendor needs the board as a line item they receive,
-not as 47 lines they cannot place. Grouping key, in order of preference:
+product MBOM: the final-assembly vendor needs the board as one item they receive,
+not as 47 lines they cannot place. Whether a consumer wants that line expanded is
+its own decision, which is why the walk returns a tree and flattening is left to
+the caller — a CSV exporter for one vendor wants the subtree elided, and a costed
+roll-up wants it expanded.
+
+Grouping key within a node, in order of preference:
 
 ```
 mpn:<manufacturer_part_number>       when a real part is known
@@ -252,7 +329,11 @@ spec:<designation>                   otherwise — deterministic from the spec a
 ```
 
 Never a catalogue key. Two catalogues may name the same screw differently, and
-renaming an entry must not silently split or merge BOM lines.
+renaming an entry must not silently split or merge a BOM line. Note that grouping
+is **per node**: eight identical screws under one enclosure are one line of
+quantity 8, and the same screw used by a second enclosure is a separate line
+under that enclosure. Rolling those together across the whole device is a
+purchasing question, and it is a fold over the tree rather than a property of it.
 
 ---
 
