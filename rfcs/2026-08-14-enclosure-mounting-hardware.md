@@ -713,6 +713,147 @@ as further `assembly_part` categories.
 
 ---
 
+## Part 5 — The bill of process is derived, never stored
+
+§1.2 left a tension unresolved: the screws are structurally owned by the
+enclosure, but *sequenced* by final assembly, and the two disagree. That is a
+symptom of a larger question. A device description should be **declarative** — it
+says what the thing is — while assembly is irreducibly **imperative**: press the
+inserts, drop in the board, drive four screws, fit the lid, drive four more.
+
+The resolution is that the bill of process is a **projection of the declarative
+model**, exactly as the BOM is. Nothing imperative is persisted. There is already
+precedent for this in the codebase, and it is the strongest argument available:
+nobody stores "go right, then up, then via" — they declare a `<trace>` and the
+router derives the path, again, whenever the board changes. **An authored
+assembly sequence goes stale for precisely the reason a hand-drawn enclosure goes
+stale**, which is the thesis this whole feature rests on.
+
+### 5.1 Declare joints, derive orderings
+
+The reason an aperture survives its connector being moved or rotated is that the
+aperture is declared **local** to the connector — it is a child of the part whose
+requirement it is, and it holds no global fact. The equivalent for assembly is
+the **joint**: *this screw fastens the lid to the base, seated on the lid's outer
+face, entered along −Z.* That is local to one mount, and it is already fully
+determined by `ResolvedFdmMount`, which computes the head seat, the boss span,
+the parts clamped and the axis. No new authoring, and no new solver input.
+
+> **The rule, stated generally: only local facts are declared. Every global
+> ordering is derived.** "Step 3: fit the lid" is a global statement and breaks
+> the moment anything moves. "This screw joins these two parts along this axis"
+> survives any rearrangement, because it is a property of the joint and not of
+> the plan.
+
+### 5.2 Two rules generate the plan, and they are not the same rule
+
+An early version of this section claimed a single tool-access ray produced
+essentially all the precedence. Prototyped against real solver output, that
+turned out to be two rules doing different jobs, and conflating them made the
+validity check silently inert:
+
+| Rule | Sweep | Produces |
+| --- | --- | --- |
+| **Access** | from the head seat **outward**, along the access axis | *ordering*. Anything solid that ray crosses must be installed later — that is the tool needing to reach in. |
+| **Path** | from the head seat **inward**, to the end of the shank | *validity*. A part in the way that this fastener does not join, and that is not drilled through there, is not an ordering problem at all: it is a fastener that cannot be installed. |
+
+Run over the worked example — four PCB mounts and four corner lid mounts, the
+same fixture as `core/tests/enclosure/enclosure-screw-boss-3d.test.tsx` — the
+access rule derives:
+
+```
+EN1.H1.screw before place:lid          EN1.H3.screw before place:lid
+EN1.H2.screw before place:lid          EN1.H4.screw before place:lid
+```
+
+Nobody wrote "the lid goes on after the board is screwed down". It falls out of
+the ray from each board screw's head hitting solid lid. The lid's *own* screws
+are correctly **not** ordered against it, because the ray passes through the
+clearance hole the lid mount cut — a distinction that only appears if the test
+respects the holes rather than a bounding box.
+
+Topologically sorting that, preferring to keep the same tool in hand, gives:
+
+```
+place base | press 8 inserts | place PCBA | drive 4 board screws
+           | place lid | drive 4 lid screws
+reorientations: 0    tool changes: 5
+```
+
+And the path rule has teeth, which was checked by removing one lid clearance
+hole:
+
+```
+✗ EN1.x_neg_y_neg: the screw cannot reach its boss -- it passes through the lid
+  at (-23.3, -15.3) and there is no clearance hole there
+```
+
+Worth noting what that demonstrates about failure modes: a **cycle** in the
+precedence graph is the general statement of "this cannot be assembled", but it
+is rarely the *first* thing to fire, and it is a poor error when it does. The
+specific defects — a fastener with no path, a head with no tool access — are
+caught earlier and name the part and the coordinate. The cycle check is a
+backstop, not the front line.
+
+### 5.3 The artifact is a partial order; a sequence is a rendering
+
+`getAssemblyPlan` should return the **DAG**, not a numbered list, for the same
+reason `getDeviceMbom` returns a tree rather than a CSV (§1.6). The eight inserts
+are mutually unordered; an assembler with two operators will exploit that and one
+with a fixture that presses four at once will exploit it differently. Flattening
+to a numbered list throws that away, and it is the caller's decision, not ours.
+
+Optimality is only meaningful against a stated objective, and the honest position
+is that we can compute *valid* cheaply and *optimal* only where the objective is
+measurable from geometry:
+
+| Objective | Computable now | Note |
+| --- | --- | --- |
+| fewest workpiece reorientations | **yes** — distinct access axes over the sequence | the expensive human operation; measured 0 for the design above, and 1 when a single screw was flipped to enter through the floor |
+| fewest tool changes | **yes** — runs of equal tool | measured 5 |
+| shortest time | no | needs per-operation time data nobody has supplied |
+| most robust to gravity | no | needs a fixturing and stability model |
+
+Reorientations moving 0 → 1 in response to one screw changing direction is the
+property that answers "optimal no matter the arrangement": the metric is derived
+from the same declarations, so it tracks the design rather than describing a
+sequence somebody wrote down once.
+
+This is a solver, and it belongs with the others — `BaseSolver`, a
+`GenericSolverDebugger` view of the precedence DAG — not a pass buried in the
+enclosure builder.
+
+### 5.4 What this resolves, and what it is not
+
+It dissolves §1.2's screw question. Once the consumption point of each part is
+*derived*, "which node owns the screws" stops being a structural commitment and
+becomes a presentation choice: the structure groups by what generates the
+requirement, the process says when each piece is consumed, and both come from one
+model. An operation-sequenced MBOM is then a different fold over the same tree,
+not a different tree.
+
+Deliberately not claimed:
+
+- **The general case is harder than the enclosure.** The prototype used z-span
+  proxies with their holes, which suits a stacked box. Arbitrary assemblies need
+  swept-volume tests against real geometry, and the standard formulation is
+  assembly-by-disassembly — a part is installable iff it is removable from the
+  finished state along some free direction. Our directions are already quantized
+  to the six faces by `EnclosureFace` and `insertion_direction`, so that search
+  is small here, and it will not be elsewhere.
+- **Nothing models gravity, fixturing, or two-handed operations.**
+- **No authoring surface is proposed.** Joints are derived from mounts; a device
+  with hand-declared parts (§1.5.1's ribbon cable) would need joints declared
+  alongside them, and that is the same open question as authoring the part.
+
+Not built now. The trigger to build it is the first consumer that needs an
+ordering — work instructions, an assembly animation, or an operation-sequenced
+MBOM — and the point of writing it down here is that the enclosure solver is
+already producing every input it requires, so nothing in Parts 1–4 needs to change
+to allow it.
+
+---
+
 ## Rejected alternatives
 
 **A category flag on `source_component`** (`bom_category: "electrical" |
