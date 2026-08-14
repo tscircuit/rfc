@@ -17,13 +17,17 @@ without interfering with the board's electrical BOM.
 
 | Area | State |
 | --- | --- |
-| `enclosure.screwboss` authoring props | this RFC; implementation in progress |
-| Vendor-backed fastener catalogue and screw-length derivation | this RFC; implementation in progress |
-| PCB mounting bosses (heat-set / press-fit / self-tapping) | this RFC |
-| Lid screw columns with countersink / counterbore head recesses | this RFC |
-| Hardware occurrences in the solver output | this RFC |
+| `enclosure.screwboss` authoring props | **implemented** (`props`) |
+| Vendor-backed fastener catalogue and screw-length derivation | **implemented** (`create-fdm-enclosure/lib/hardware/`) |
+| PCB mounting bosses (heat-set / press-fit / self-tapping) | **implemented** |
+| Lid screw columns with countersink / counterbore head recesses | **implemented** |
+| Hardware occurrences in the solver output | **implemented** (`CreateFdmEnclosureOutput.hardware`) |
+| Core reads bosses declared on holes and on the enclosure | **implemented** |
 | Durable Circuit JSON records for assembly parts | **proposed only, deliberately not implemented** |
 | `getPcbaBom` / `getEnclosureBom` / `getDeviceMbom` | proposed, blocked on the circuit-json records |
+| Core lowering of hardware geometry into CAD | not started |
+| Boss-versus-component and boss-versus-aperture collision checks | not started |
+| Derived bill of process (Part 5) | designed and prototyped; not built |
 | Fastener procurement engine (McMaster / Fastenal adapters) | proposed |
 | Cable, label, thermal-pad and packaging items | out of scope |
 
@@ -125,9 +129,11 @@ hang the screws off the *device*. They go under the enclosure anyway: they exist
 because the enclosure has bosses, they are specified by the enclosure design,
 they are ordered with the rest of the box hardware, and deleting the enclosure
 deletes them. **Structure by what generates the requirement; sequence by the bill
-of process** -- and there is no bill of process, because the parametric-enclosures
-RFC puts assembly steps out of scope. If one ever lands, that is the moment to
-split these, and this paragraph is why such a split would not be a bug fix.
+of process.** Part 5 shows that the sequence is *derivable* from what the solver
+already computes, which is what makes this a presentation choice rather than a
+structural commitment: the tree groups by requirement, a derived process says
+when each piece is consumed, and an operation-sequenced MBOM is then a different
+fold over the same tree rather than a different tree.
 
 ### 1.3 Hardware is identified by specification, not by MPN
 
