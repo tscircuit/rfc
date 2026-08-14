@@ -343,21 +343,75 @@ chosen = the smallest stocked length ≥ exact
 
 with `requiredEngagement` a property of the fastening method:
 
-| Fastening | Required engagement | Upper bound |
-| --- | --- | --- |
-| `heat_set_insert` | the insert's threaded length | must not bottom out in the insert |
-| `press_fit_insert` | the insert's threaded length | as above |
-| `self_tapping` (thermoplastic) | 2 × nominal thread Ø | must not break through the outer surface |
-| `machine_screw_nut` | full nut height + 1–2 thread protrusion | — |
+| Fastening | Required engagement |
+| --- | --- |
+| `heat_set_insert`, `press_fit_insert` | the insert's threaded length |
+| `self_tapping` (thermoplastic) | 2 × nominal thread Ø — plastic is far weaker than the screw, so the joint fails by stripping the boss |
 
-Both bounds are checked **after** rounding, since rounding is what can violate
-them. If the chosen length exceeds the upper bound, the next shorter stocked
-length is tried; if that falls below `exact`, the mount is reported as a design
-error naming the stack, the bound and the two candidate lengths, rather than
-silently emitting a screw that bottoms out.
+and one upper bound: **the bore**. Not, as first written, the insert's threaded
+length — an insert is a barrel open at both ends, so a screw may continue past
+it; what it may not do is reach solid material. The bore in turn is deepened to
+fit the screw that was actually *chosen*, since rounding up is what decides how
+far the screw reaches:
+
+```
+bore = max(insert length + melt relief, screw penetration),  capped by the floor rule
+```
+
+Deriving it the other way round — fixing the bore at the insert's length and then
+requiring the screw to fit it — rejects every stack whose exact length is not
+itself a stocked size, which is most of them. The first implementation did
+exactly that and could not resolve a single default enclosure.
+
+The bound is checked **after** rounding, since rounding is what can violate it.
+When it fails, no stocked screw fits the stack at all, and that is reported with
+both bounds. There is deliberately no "try the next shorter length" fallback: the
+lengths are sorted, so the shortest one that engages is the only candidate that
+could also be short enough, and anything below it is by definition too short. A
+fallback there is unreachable code that reads like a safety net.
 
 The length series is data, from the catalogue entry or the fastener engine —
 never a formula, because "which lengths exist" is a fact about a vendor.
+
+The same reasoning picks the **insert series**: the longest one whose installed
+length fits the bore available, so a shallow stack degrades to a short series
+rather than failing. The default 4mm standoff over a 2mm floor leaves 5.2mm of
+bore, which does not take a 5.7mm M3 insert — the reference implementation hit
+this and hardcoded the short insert, which then made every deeper enclosure
+weaker than it needed to be.
+
+### 2.3.1 Two clearance series, because two different people drill the hole
+
+ISO 273 gives a fine and a medium series, and which one applies depends on who
+owns the hole:
+
+| Hole | Series | Why |
+| --- | --- | --- |
+| the PCB's mounting hole | **fine** (3.2mm for M3) | we do not drill it, and 3.2mm for an M3 is what practically every layout uses. Requiring the medium 3.4mm would reject almost every real board while the screw passes through perfectly well. |
+| the lid's clearance hole | **medium** (3.4mm for M3) | we do drill it, and a printed part wants assembly slop |
+
+This distinction was found by the first end-to-end fixture, which used a 3.2mm
+mounting hole — the obvious thing to write — and was rejected by a rule that had
+no business applying to it.
+
+### 2.3.2 A head recess is two different depths
+
+| Recess | Depth | For an M3 |
+| --- | --- | --- |
+| counterbore | the head's height | 3mm |
+| countersink | `(headDiameter − clearanceDiameter) / 2` | 1.1mm, because a 90° cone descends 1mm per 1mm of radius |
+
+The countersink is *shallower than the head is tall*, because the lower part of
+the head sits inside the clearance hole rather than in the cone. Cutting the cone
+to the head's height instead sinks the head below flush and removes twice the
+material. Both the geometry and the "is there enough material left" rule read one
+function for this, because when they each had their own idea of the depth, one of
+them was always wrong.
+
+It follows that a **socket cap head defaults to no recess at all**. A counterbore
+is a legal thing to ask for and is right on a thick part, but an M3 cap head is
+3mm and a printed lid is 2mm, so defaulting to one would cut a recess straight
+through the lid of every box that did not ask for it.
 
 ### 2.4 What stays generic, what is FDM-specific
 
@@ -370,9 +424,12 @@ in the parametric-enclosures RFC therefore gains one directory:
 | `lib/hardware/` | thread tables, head geometry, clearance/pilot holes, designations, BOM identity, length derivation |
 | `lib/fdm/` | insert boss wall thickness, melt relief, self-tap pilot depth in plastic, minimum floor under a bore, printed lid columns |
 
-`lib/hardware/` may import `lib/enclosure/` and `lib/assembly/`, never `lib/fdm/`
-— the same rule the existing directories follow, enforced by the modules
-themselves.
+`lib/hardware/` is a **leaf**: it imports nothing from `lib/assembly/`,
+`lib/enclosure/` or `lib/fdm/`, because a thread designation is not an enclosure
+concept and a fastener catalogue should be liftable into its own package the day
+something other than an enclosure needs one. The dependency runs the other way --
+`lib/enclosure/` names fastener types in its mount input, and `lib/fdm/` decides
+what a printed boss does with them.
 
 ---
 
@@ -468,7 +525,32 @@ also accepted. Head recesses matter here and only here: the lid is ours to cut.
 `headRecess="none"` with `head="countersunk"` is a design error: a conical head
 on a flat surface neither seats nor clamps.
 
-### 3.3.1 Geometry contributions
+### 3.3.1 The box grows to fit its own mounts
+
+A corner column stands tangent to the two inside walls it sits between, so it
+intrudes diagonally into exactly the space the board wants. In a box sized to hug
+the board -- which is what an unsized `fdm.box` is -- an M3 column of 7.2mm
+overlaps the board every time. The reference implementation answered this by
+bolting external "ears" onto the outside of the box.
+
+Growing the box is the simpler answer, and it is the one this package already
+gives in Z, where the depth grows until the lid clears every side-wall aperture.
+Two dimensions therefore acquire a mount-derived minimum, applied under exactly
+the existing rule -- **grow what the author did not state, and hold what they did
+to the same minimum with an actionable error**:
+
+| Dimension | Minimum | Because |
+| --- | --- | --- |
+| `width`, `height` | board + walls + column radius + a diagonal share of `(radius + clearance)` | the column must clear the board corner |
+| `lidThickness` | recess depth + `minMaterialUnderHeadRecess` | what is left under the recess is what holds the screw down |
+
+The XY rule is stated per axis, which is stronger than strictly necessary for a
+long thin box, where one axis could have carried more of the diagonal. That is a
+deliberate trade: the exact condition is one equation in two unknowns and names
+no minimum width, so it can reject a box without being able to say what would fix
+it.
+
+### 3.3.2 Geometry contributions
 
 Every feature contributes an ordered set of operations to named parts, rather
 than being inlined into a shell builder — the pattern the existing aperture
@@ -483,6 +565,17 @@ cutouts already follow:
 and each mount contributes hardware occurrences (§1.5) for its screw and, where
 applicable, its insert, positioned so a viewer can draw them and an assembler can
 find them.
+
+Composition applies every part's adds before its subtracts. That ordering is the
+whole reason contributions are kept as two lists rather than being inlined: a
+boss unioned *after* its own bore would fill the bore back in, and making it a
+property of composition means no future feature builder has to remember it.
+
+Apertures are subtracted after the bosses are fused, so an opening that overlaps
+a boss removes the material in its way rather than being covered by it. That is
+the right outcome -- the part has to fit -- but it silently weakens the boss, and
+a boss/aperture collision check belongs with the other placement rules once they
+exist.
 
 ### 3.4 Design rules
 
@@ -512,16 +605,18 @@ Validations that produce errors rather than geometry:
 `circuit-json` change.
 
 1. `create-fdm-enclosure` gains `lib/hardware/` (catalogue, designations, length
-   derivation) and mount resolution and geometry in `lib/fdm/`.
-2. The solver output gains `mounts: ResolvedMount[]` and
+   derivation) and mount resolution and geometry in `lib/fdm/`. **Done.**
+2. The solver output gains `mounts: ResolvedFdmMount[]` and
    `hardware: HardwareOccurrence[]` — the occurrence data of §1.5 as plain data,
    minus the record type and ids. Designing this now is what makes Stage 2 a
-   lowering rather than a redesign.
-3. Core lowers hardware **geometry only**, as `cad_component`s reusing the
+   lowering rather than a redesign. **Done.**
+3. Core reads `<enclosure.screwboss>` from the holes and from the enclosure and
+   feeds the solver. **Done.**
+4. Core lowers hardware **geometry only**, as `cad_component`s reusing the
    enclosure box's *existing* synthetic owner. Several `cad_component`s may
    already share one PCB owner — base and lid do exactly that today — so N screws
-   add **zero** BOM rows.
-4. The MBOM is asserted in tests against the solver output.
+   add **zero** BOM rows. *Next.*
+5. The MBOM is asserted in tests against the solver output.
 
 The honest cost: a saved `circuit.json` renders the screws but cannot say what
 they are. That is one phase's gap, and it is precisely what Stage 2 closes.
