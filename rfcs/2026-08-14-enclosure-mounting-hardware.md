@@ -347,11 +347,19 @@ rebuilds components from those records using the inflators in
 boundary mid-render, not a persistence question, and it would force a record for
 a reason unrelated to everything above.
 
-It is real. Reproduced with a boss inside a `<subcircuit _subcircuitCachingEnabled>`:
-the solver received only the mount declared *outside* it, and the enclosure
-rendered clean and short one mount. (An earlier attempt using
-`<group subcircuit>` proved nothing, because the isolation methods live on the
-`Subcircuit` class and a plain `Group` returns early.)
+It is real, and confirmed by A/B rather than by reading: with the guard disabled
+the solver receives only the mount declared *outside* the cached subcircuit
+(`["EN1.H2"]`, one `pcb_hole` where two were declared) and with it restored both
+survive (`["EN1.H1","EN1.H2"]`, two holes). The enclosure renders clean either
+way, which is the whole problem.
+
+Two false starts are worth recording, because both are the same mistake and it
+is an easy one to repeat here: a probe that inspects the component tree by
+guessing at identity proves nothing. `<group subcircuit>` is not the same as
+`<subcircuit>`, and `<subcircuit>` reports `componentName: "Group"` — it is a
+`Subcircuit` instance that never overrides its config — so searching the tree for
+`componentName === "Subcircuit"` finds nothing and reads exactly like "isolation
+did not run".
 
 The resolution is not to add a record but to **decline the optimization**.
 `ephemeral-declarations.ts` marks components that carry no Circuit JSON of their
@@ -366,10 +374,24 @@ identical modules, with the flag on versus off,
 | 24 | 1272ms | 954ms | 1.33x |
 
 so declining it for the subtrees that declare enclosure features costs at most a
-third of the render of those subtrees, on an opt-in path (`_subcircuitCachingEnabled`
-is underscore-prefixed and off by default), in the narrow intersection of "repeated
+third of the render of those subtrees, in the narrow intersection of "repeated
 many times" and "declares an enclosure feature". Against silently shipping an
 enclosure with a missing mount, that is a rounding error.
+
+**Caching is opt-in, and that is an argument for the guard rather than against
+it.** Verified: the prop is `z.boolean().optional()` with no default, and on a
+subcircuit with nothing set, `_subcircuitCachingEnabled` resolves to `undefined`
+and `_isIsolatedSubcircuit` to `false`. Nothing in the cloned ecosystem — eval,
+cli, runframe — turns it on.
+
+But the switch has a wider surface than one prop. `getInheritedProperty` walks
+*up* the tree, so setting it on a `<board>` or an outer `<group>` enables it for
+every subcircuit beneath; and it then falls back to `root.platform`, through a
+runtime `in` check rather than the `platformConfig` schema, so **a platform can
+enable it globally for code that never mentions it**. A correctness bug that
+appears only once someone flips a platform flag is the worst kind to rely on
+nobody flipping: it is invisible in every local test, and the symptom — an
+enclosure quietly missing a mount — does not look like a caching problem.
 
 Two things found on the way that are worth recording because they are **not**
 enclosure problems:
