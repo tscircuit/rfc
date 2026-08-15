@@ -333,10 +333,10 @@ where the resolved apertures still exist. This will constrain us to run assembly
 during the enclosure rendering; if this becomes ornerous, we can add the circuit-json
 records.
 
-The proposal is therefore **three records, all structural** —
-`source_assembly_device`, `source_enclosure`, `assembly_part` — each justified by
+The proposal is therefore **one record** — `assembly_part` (§1.5.2) — justified by
 the assembly and BOM tree rather than by having been typed into a `.tsx`. That is
-a considerably easier case to make to circuit-json than five.
+a considerably easier case to make to circuit-json than the five this section
+started with.
 
 **The one mechanism that could have forced a record, and why it does not.**
 Core renders cached subcircuits *in isolation*:
@@ -1036,8 +1036,8 @@ Validations that produce errors rather than geometry:
 The honest cost: a saved `circuit.json` renders the screws but cannot say what
 they are. That is one phase's gap, and it is precisely what Stage 2 closes.
 
-**Stage 2 — after the records are reviewed.** Land `source_assembly_device`,
-`source_enclosure` and `assembly_part`; add `getPcbaBom`, `getEnclosureBom` and
+**Stage 2 — after the record is reviewed.** Land `assembly_part`; add
+`getPcbaBom`, `getEnclosureBom` and
 `getDeviceMbom` to `circuit-json-util`; move enclosure shells off `pcb_component`
 ownership, which also removes the stray `EN1` row measured in §1.1.
 
