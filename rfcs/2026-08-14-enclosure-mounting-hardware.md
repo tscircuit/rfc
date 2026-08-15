@@ -346,10 +346,10 @@ Hardware is specified the way vendors sell it, along orthogonal axes:
 | `length` | distance, **normally omitted** | derived from the stack; see §2.3 |
 
 Each is a typed enum, so a typo is a compile error rather than a silent fallback,
-and the axes compose. The alternative -- whole-stack presets under a nickname, as
-the reference implementation used -- costs a table that grows as the product of
-the axes instead of their sum, and cannot be varied one axis at a time. Presets
-can return later as sugar over these axes.
+and the axes compose. Whole-stack presets under a nickname would read more
+tersely at the cost of a table growing as the product of the axes rather than
+their sum, and could not be varied one axis at a time; they can return later as
+sugar over these axes.
 
 ### 2.2 The catalogue is a curated view of a real vendor catalogue
 
@@ -428,10 +428,9 @@ than props also preserves the parametric-enclosures RFC's XML-compatibility rule
 -- the TSX says *what the part is*, never *where to buy it* -- with per-boss
 `manufacturerPartNumber` / `supplierPartNumbers` attributes as an escape hatch.
 
-Because entries are vendor-backed, there is no "generic hardware with no
-procurement identity", so the reference implementation's `generic` flag and its
-`bomMode: off | warn | strict` gate are not carried over. The MBOM is always
-built.
+Because entries are vendor-backed there is no "generic hardware with no
+procurement identity", so no `generic` flag and no `bomMode` gate. The MBOM is
+always built.
 
 ### 2.3 Screw length is derived, then rounded to a stocked length
 
@@ -607,12 +606,11 @@ The aperture's owner is the nearest ancestor with a `pcb_component`; the boss's
 owner is the **hole** it is declared in, which supplies its centre and its drill
 diameter. Two consequences worth stating:
 
-- **Nothing is inferred.** A hole without a `<enclosure.screwboss>` gets no boss.
-  This is the same rule the parametric-enclosures RFC states for apertures
-  ("inference places or validates declared features; it does not invent them"),
-  and it retires a confirmed defect in the reference implementation, where
-  automatic mounting-hole detection swept up a keyswitch's alignment pegs and
-  grew bosses under them.
+- **Nothing is inferred.** A hole without a `<enclosure.screwboss>` gets no boss
+  — the same rule the parametric-enclosures RFC states for apertures: "inference
+  places or validates declared features; it does not invent them". Detecting
+  mounting holes automatically instead would grow bosses under any hole that
+  looks like one, including a keyswitch's alignment pegs.
 - **The PCB hole is a constraint to validate, not a value to guess.** The drill
   diameter must clear the screw shank; if it does not, the mount is a design
   error naming both numbers.
