@@ -29,7 +29,7 @@ without interfering with the board's electrical BOM.
 | A durable Circuit JSON record for assembly parts (one, self-nesting) | **proposed only, deliberately not implemented** |
 | Records for authored aperture/boss intent | not proposed; apertures and bosses are solver inputs, consumed during the render |
 | `getPcbaBom` / `getEnclosureBom` / `getDeviceMbom` | proposed, blocked on the circuit-json records |
-| Core lowering of hardware geometry into CAD | not started |
+| Core lowering of hardware geometry | deferred to Stage 2, with `assembly_component` |
 | Boss-versus-component and boss-versus-aperture collision checks | not started |
 | Derived bill of process (Part 5) | designed and prototyped; not built |
 | Hardware procurement engine (McMaster / Fastenal adapters) | proposed |
@@ -84,7 +84,11 @@ gives:
 
 The enclosure is quoted to the board assembler as a line item, because
 `cad_component` requires both `pcb_component_id` and `source_component_id`, so
-generated CAD forces a synthetic PCB component into existence to own the enclosure.
+generated CAD forces a synthetic PCB component into existence to own the
+enclosure. Those required ids are not an oversight: **`cad_component` is the CAD
+model of a PCB component**, and they are the record saying so. An enclosure part
+is not a PCB component, so the fix is not to relax that record but to stop
+expressing assembly geometry as one.
 This is wrong because the enclosure is not required to assemble the board,
 and should not be part of the EBOM sent to the board manufacturer/pick-n-place.
 
@@ -106,17 +110,13 @@ device "controller"                            <- final assembly
 |   |-- R1  10k 0402             x1               (the EBOM: pcb_components)
 |   `-- ...
 |-- enclosure "EN1"              x1            <- subassembly  -> manufacturing
-|   |-- base                     x1   MAKE        FDM, PLA, base.stl
-|   |-- lid                      x1   MAKE
-|   |-- M3 heat-set insert       x8   BUY
-|   `-- M3x8 countersunk screw   x8   BUY
-`-- ribbon cable, 10-way, 100mm  x1   BUY      <- device-level: belongs to no
+|   |-- base                     x1               FDM, PLA, base.stl
+|   |-- lid                      x1
+|   |-- M3 heat-set insert       x8
+|   `-- M3x8 countersunk screw   x8
+`-- ribbon cable, 10-way, 100mm  x1            <- device-level: belongs to no
                                                   subassembly
 ```
-
-`MAKE` and `BUY` are **derived, not stored**: a part carrying a specification
-designation is bought, a part carrying generated geometry and no designation is
-made.
 
 Each assembly's BOM goes to the vendor that builds that assembly, and that falls
 out of the structure rather than being asserted by a field. The PCBA's BOM is
@@ -767,7 +767,10 @@ spec:spacer-stock nylon 6x3.2     stock, whatever it was cut to
 ```
 
 Four mounts needing 7.5mm each are therefore **one line of 30mm of stock**, not
-four line items naming a part number nobody sells. The cut list is not lost by
+four line items naming a part number nobody sells. That is the length the design
+consumes; kerf, trim and how many 300mm rods to order are the assembler's, in the
+same way that a BOM asking for eight screws does not ask for nine in case one is
+dropped. The cut list is not lost by
 that fold: it is the occurrences, which a consumer already holds. Cut stock
 overage estimation is recommended but left to be implemented later.
 
@@ -839,19 +842,27 @@ Not yet: boss against a component body, an aperture, or the board edge.
    lowering rather than a redesign. **Done.**
 3. Core reads `<enclosure.screwboss>` from the holes and feeds the solver.
    **Done.**
-4. Core lowers hardware **geometry only**, as `cad_component`s reusing the
-   enclosure box's *existing* synthetic owner. Several `cad_component`s may
-   already share one PCB owner — base and lid do exactly that today — so N screws
-   add **zero** BOM rows. *Next.*
-5. The MBOM is asserted in tests against the solver output.
+4. The MBOM is asserted in tests against the solver output.
 
-The honest cost: a saved `circuit.json` renders the screws but cannot say what
-they are. That is one phase's gap, and it is precisely what Stage 2 closes.
+Hardware geometry is **not** lowered in Stage 1. It could be, as `cad_component`s
+sharing the enclosure box's existing synthetic owner — that is what the shells do
+today — but every one of those is a record asserting that a screw is a PCB
+component, and Stage 2 would delete them. The cost of waiting is that a saved
+`circuit.json` has the hardware in neither geometry nor BOM until Stage 2; the
+cost of not waiting is tripling the number of records built on a claim we intend
+to withdraw.
 
 **Stage 2 — after the record is reviewed.** Land `assembly_component`; add
-`getPcbaBom`, `getEnclosureBom` and
-`getDeviceMbom` to `circuit-json-util`; move enclosure shells off `pcb_component`
-ownership, which also removes the stray `EN1` row measured in §1.1.
+`getPcbaBom`, `getEnclosureBom` and `getDeviceMbom` to `circuit-json-util`; and
+emit enclosure parts and hardware as `assembly_component`s rather than as
+`cad_component`s with a synthetic PCB owner, which also removes the stray `EN1`
+row measured in §1.1.
+
+That last step is not free, and the RFC should not pretend otherwise: assembly
+geometry on `assembly_component` is **a second geometry record for renderers to
+learn**. `circuit-json-to-gltf` and `3d-viewer` each grow a path that reads it,
+and until both do, an enclosure emitted the new way renders as nothing. Stage 2 is
+therefore a coordinated change across four repos, not a schema addition.
 
 **Later.** Vendor adapters for the hardware engine; imperial threads; standoffs
 and captive nuts; device-level items (labels, thermal pads, packaging) as further
