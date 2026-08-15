@@ -455,7 +455,7 @@ are. Two layers, mirroring the split tscircuit already uses for electrical parts
 
 | Layer | Contents | Analogue |
 | --- | --- | --- |
-| Built-in catalogue (`create-fdm-enclosure/lib/hardware/`) | curated specifications, each with dimensions and at least one real part number, plus the stocked series per specification | a footprint library |
+| Built-in catalogue (`create-fdm-enclosure/lib/hardware/`) | curated specifications with dimensions and the stocked series per specification | a footprint library |
 | Hardware engine (platform config) | resolves a specification to current part numbers, and to the variants a vendor stocks | `partsEngine.findPart` |
 
 ```ts
@@ -483,6 +483,20 @@ hardwareEngine?: {
   }>
 }
 ```
+
+**What the built-in catalogue actually carries, as opposed to what this section
+first claimed.** It carries dimensions and stocked series, and **no part numbers
+at all** — the earlier wording promised "at least one real part number" per
+entry, and not one entry has ever had one. That mattered beyond tidiness: the
+claim was used to justify leaving spacers out ("no vendor-backed spacer catalogue
+exists"), a bar screws and inserts had never cleared either. Spacers are in now,
+and the real distinction is narrower and worth stating: **a screw's dimensions
+come from a published standard (ISO 4762 and friends) and a spacer's come from a
+vendor**, so a spacer entry is dimensionally plausible rather than
+standards-derived, and is marked in the source as needing verification. Part
+numbers arrive with the engine, from a vendor, or not at all — never invented
+here, because a fabricated part number poisons exactly the guarantee this
+catalogue exists to give.
 
 **Why `variants` rather than `availableLengthsMm`.** An earlier draft returned a
 length series, which silently asserts that the axis a part varies along is
@@ -743,8 +757,8 @@ fill that gap, and the choice is `lidColumn`:
 | | What it is | Consequence |
 | --- | --- | --- |
 | `printed` (default) | a hollow column moulded into the **lid**, landing on the board | clamps the board as well as the lid; stiffens the lid; costs nothing to buy |
+| `spacer` | a bought nylon tube | one BOM line; see §3.3.2 for why its length is not a constraint on the enclosure |
 | `none` | nothing — the screw crosses open air | the lid seats on the walls as it always did, and the board is held by whatever `board` mounts it has |
-| a purchased spacer | a tube between board and lid | **not implemented**: the catalogue admits only specifications a vendor is known to stock, and there is no spacer catalogue yet |
 
 **The column cannot belong to the base**, and this is the constraint that decides
 the whole feature. A column standing up from the floor would occupy the very hole
@@ -762,6 +776,44 @@ under the existing rule — grow what the author did not state, hold what they d
 to the same minimum with an actionable error — because what remains under a head
 recess is what holds the screw down.
 
+### 3.3.2 A spacer is cut to length, which is why its length constrains nothing
+
+A spacer has to be exactly as long as the gap it fills, and that gap is exactly
+the enclosure's `topHeadroom` — the lid's underside sits one lid thickness below
+the outside top, and the board's top surface is the headroom below that. Stocked
+spacer lengths are discrete, so a naive reading says the enclosure must round its
+own headroom to a vendor's inventory.
+
+It does not, because **spacer stock is sold by the length and cut during
+assembly**. So resolution takes the better of the two:
+
+| | When | Unit |
+| --- | --- | --- |
+| a stocked piece | the gap equals a stocked length — the default 6mm headroom is one | `each`, quantity 1 |
+| cut from stock | any other gap | `mm`, quantity = the cut length |
+
+A stocked piece is preferred where one fits, because cutting is a hand operation
+with a hand operation's tolerance: a sawn nylon tube is good to a few tenths and
+that error lands directly in the clamp.
+
+**This is the first item in the BOM that is not counted in pieces**, and it
+forces a small, overdue generalization. `HardwareOccurrence` gains `quantity` and
+`unit`, where every existing item is `{ quantity: 1, unit: "each" }`. Grouping
+then *sums quantity* rather than counting occurrences, which yields a count for
+discrete parts and a length for stock from one rule.
+
+The identity follows the same logic. What is bought when a spacer is cut is the
+**stock**, not the piece, so the designation deliberately omits the length:
+
+```
+spec:spacer nylon 6x3.2x6         a stocked 6mm piece
+spec:spacer-stock nylon 6x3.2     stock, whatever it was cut to
+```
+
+Four mounts needing 7.5mm each are therefore **one line of 15mm of stock**, not
+four line items naming a part number nobody sells. The cut list is not lost by
+that fold: it is the occurrences, which a consumer already holds.
+
 ### 3.3.2 Geometry contributions
 
 Every feature contributes an ordered set of operations to named parts, rather
@@ -772,6 +824,7 @@ cutouts already follow:
 | --- | --- | --- | --- |
 | every mount | base | boss cylinder, floor → board underside | insert bore or self-tap pilot; melt relief |
 | `fastens="lid"` | lid | the board-to-lid column, when `printed` | one clearance hole for the whole run through lid-side material — plate and column together — plus the head recess |
+| `lidColumn="spacer"` | — | nothing: a bought tube already has a bore | — |
 | both | — | — | nothing below the minimum floor thickness under a bore |
 
 and each mount contributes hardware occurrences (§1.5) for its screw and, where
