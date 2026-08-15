@@ -275,6 +275,44 @@ it.
 
 So the pattern is copied and the record is not.
 
+##### What the solver emits today, and how it would lower
+
+Part 3 ships without this record: the solver returns `HardwareOccurrence[]` as
+plain data. Writing the mapping down is what makes Stage 2 mechanical rather than
+a re-derivation, and it exposes one fact worth seeing early -- **every occurrence
+the solver emits is a `purchased_part` leaf.** Three of the four variants have no
+solver counterpart at all and are synthesized during lowering.
+
+| `HardwareOccurrence` | `assembly_component` | |
+| --- | --- | --- |
+| `id` | `assembly_component_id` | |
+| `designation` | `designation` | |
+| `hardwareString` | `hardware_string` | |
+| `displayValue` | `display_value` | via `purchasable_part_properties` |
+| `manufacturerPartNumber` | `manufacturer_part_number` | via `purchasable_part_properties` |
+| `supplierPartNumbers` | `supplier_part_numbers` | via `purchasable_part_properties` |
+| `generatedBy` | `generated_by` | |
+| `position` | `position` | |
+| `role` | — | `"screw" \| "insert" \| "spacer"`, implied by the designation |
+| `mountId` | — | solver-internal traceability; the record says why a part exists with `generated_by` |
+| `bomGroupKey` | — | derived on read as `spec:<designation>` |
+
+The case change is not drift: circuit-json is snake_case and gates on it
+(`check-snake-case`, `lint:zod`), while the solver is an ordinary TypeScript
+library.
+
+What lowering has to *invent*:
+
+| Node | From |
+| --- | --- |
+| the device root (`assembly`) | synthesized; the board and the enclosure become its children |
+| the enclosure (`assembly`) | synthesized, one per solved enclosure |
+| base and lid (`fabricated_part`) | the composed shells, which the solver returns as geometry rather than as BOM lines, with `manufacturing_process: "fdm"` |
+| the board (`board`) | the existing `pcb_board` |
+
+That is why `manufacturing_process` has no occurrence field to come from: the
+printed shells are not hardware, and the solver has never needed to count them.
+
 #### 1.4.3 The invariants, and where they are enforced
 
 The variants in 1.4.2 make some invalid states unrepresentable -- geometry on an
