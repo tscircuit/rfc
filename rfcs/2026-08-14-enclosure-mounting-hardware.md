@@ -23,10 +23,11 @@ without interfering with the board's electrical BOM.
 | Lid screws through a PCB hole, with countersink / counterbore recesses | **implemented** |
 | Hardware occurrences in the solver output | **implemented** (`CreateFdmEnclosureOutput.hardware`) |
 | Spacers, stocked or cut from stock, and length-based BOM units | **implemented** |
-| Hardware DSL, and generated geometry for purchased parts | **implemented** |
+| Hardware DSL like footprinter, and generated geometry for purchased parts | **implemented** |
 | Vendor CAD (McMaster) for non-parametric families | proposed; blocked on a licensing answer, not on format support |
 | Core reads bosses declared on holes and on the enclosure | **implemented** |
-| Durable Circuit JSON records for assembly parts | **proposed only, deliberately not implemented** |
+| Durable Circuit JSON records for assembly parts (three, all structural) | **proposed only, deliberately not implemented** |
+| Records for authored aperture/boss intent | **argued against** (§1.5.3); one open risk around cached subcircuits |
 | `getPcbaBom` / `getEnclosureBom` / `getDeviceMbom` | proposed, blocked on the circuit-json records |
 | Core lowering of hardware geometry into CAD | not started |
 | Boss-versus-component and boss-versus-aperture collision checks | not started |
@@ -154,7 +155,7 @@ The second reason this is not simply "the electrical BOM with more rows":
 | Substitution | risky, requires review | expected; any conforming part |
 | Sourcing | often single-sourced | commodity, fungible |
 | Missing MPN | a defect — `source_missing_manufacturer_part_number_warning` exists | normal |
-| What the assembler needs | that exact part | the spec, and a bag of them |
+| What the assembler needs | that exact part | the designation, and parts bins |
 
 So a hardware line's identity is a canonical **specification designation**, with
 MPN and supplier as an optional *preferred source*. That inverts the priority in
@@ -208,13 +209,16 @@ interface SourceEnclosure {
    * a multi-board enclosure without disturbing the assembly tree. A board is a
    * subassembly of the *device*, not of the enclosure — the enclosure is built
    * and shipped without a board in it.
+   * Enclosures can mount multiple PCBs in the future because each PCB can have
+   * mounting holes and cutout apertures specified for that board's components,
+   * although we only use a single boardRef per enclosure today.
    */
   pcb_board_ids: string[]
 }
 
 /**
  * One physical member item consumed by an assembly: a printed shell, a screw,
- * an insert, a washer, a label, a ribbon cable.
+ * an insert, a spacer, a washer, a label, a ribbon cable.
  *
  * One record per physical piece — quantity is grouping, exactly as the PCBA BOM
  * derives quantity from occurrences today.
@@ -293,10 +297,64 @@ fields have a meaning to give. The alternative — relaxing
 `string` into `string | undefined` for every existing consumer, and it would
 still leave the footprint-fitting fields meaningless on these records.
 
-The proposal deliberately does **not** add a record for the authored screw-boss
-intent yet. Part-owned intent records (`source_cutout_aperture` and a
-hypothetical `source_enclosure_mount`) are a separate question that the
-parametric-enclosures RFC already owns; nothing here is blocked on it.
+### 1.5.3 There is no record for the authored intent, and there should not be
+
+No `source_enclosure_mount`, and — the same argument — an open question over
+whether `source_cutout_aperture` earns its place either.
+
+The reason is a principle worth stating outright, because it decides several
+later cases too: **Circuit JSON represents the artifact, not the source that
+produced it.** It is tempting to read the existing `source_*` records as
+"the design intent, persisted", but that is not why they exist. `source_component`
+and `source_trace` are there because the *netlist* is a semantic model that the
+schematic view, the PCB view, simulation, DRC and the BOM all read
+independently — not so that the TSX can be reconstructed. A record earns its
+place by having consumers, not by having been authored.
+
+Measured against this RFC's own criteria (§1.5), an aperture fails the fifth
+outright: it is *an input to the enclosure solver, consumed during render*, in
+exactly the way `wallThickness` and `standoffHeight` are. Nobody proposes
+persisting `wallThickness` as a record, and an aperture is the same kind of
+thing wearing a more object-like shape.
+
+A screw boss fails for a second and independent reason: **`generated_by` already
+carries everything a mount record would.** A mount is not a thing anyone makes or
+buys — it is a feature of the base, and the base is already an `assembly_part`.
+The things it *does* produce (a screw, an insert, a spacer) are parts, already
+have records, and each already points at the `pcb_hole` that caused it. A
+`source_enclosure_mount` would restate an association the parts already carry.
+
+**What is given up, stated plainly.** With no aperture record, nothing downstream
+can ask "which component is this opening for?" — the opening is anonymous
+geometry inside the shell's CSG tree. A checker running over a *saved*
+`circuit.json` therefore cannot verify a rule like "every connector that declares
+an aperture got an unobstructed one"; that check has to run during the render,
+where the resolved apertures still exist. Both are acceptable today, and neither
+is recovered by a record that no shipped consumer reads.
+
+The proposal is therefore **three records, all structural** —
+`source_assembly_device`, `source_enclosure`, `assembly_part` — each justified by
+the assembly and BOM tree rather than by having been typed into a `.tsx`. That is
+a considerably easier case to make to circuit-json than five.
+
+**One unresolved risk, which is a mechanism rather than a representation
+argument.** Core renders cached subcircuits *in isolation*:
+`Subcircuit_doInitialRenderIsolatedSubcircuits` sets `subcircuit.children = []`
+and replaces the subtree with an `AnyCircuitElement[]` keyed by a prop hash. Any
+declaration that is not representable as a Circuit JSON element cannot survive
+that boundary — which would mean an `<enclosure.cutoutaperture>` or
+`<enclosure.screwboss>` inside a cached subcircuit silently disappearing. That is
+core's own internal boundary mid-render, not a persistence question, so it would
+force a record for a reason unrelated to everything above.
+
+It is recorded as a risk rather than a conclusion because **an attempt to
+reproduce it failed**: in a fixture with a boss inside a
+`_subcircuitCachingEnabled` group, both mounts reached the solver and the
+subtree was never cleared, because the isolation pass returns early when the
+group has no `getSubcircuitPropHash` (it is defined on `Board` and `Subcircuit`).
+So the hazard is real in the source and unproven in practice. It should be
+settled by a test that actually engages isolation before either record is
+accepted or finally rejected.
 
 ### 1.5.2 Provenance is a reference to *any* element, not to a hole
 
