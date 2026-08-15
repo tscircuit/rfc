@@ -27,13 +27,14 @@ without interfering with the board's electrical BOM.
 | Vendor CAD (McMaster) for non-parametric families | proposed; blocked on a licensing answer, not on format support |
 | Core reads bosses declared on holes and on the enclosure | **implemented** |
 | A durable Circuit JSON record for assembly parts (one, self-nesting) | **proposed only, deliberately not implemented** |
-| Records for authored aperture/boss intent | **argued against and not needed** (§1.5.3); the isolation hazard is handled in core instead |
+| Records for authored aperture/boss intent | **argued against and not needed** (1.5.3) |
 | `getPcbaBom` / `getEnclosureBom` / `getDeviceMbom` | proposed, blocked on the circuit-json records |
 | Core lowering of hardware geometry into CAD | not started |
 | Boss-versus-component and boss-versus-aperture collision checks | not started |
 | Derived bill of process (Part 5) | designed and prototyped; not built |
 | Hardware procurement engine (McMaster / Fastenal adapters) | proposed |
 | Cable, label, thermal-pad and packaging items | out of scope |
+| 3D rotation semantics; subcircuit caching fidelity | spun out into their own RFCs, both found here |
 
 ---
 
@@ -284,36 +285,17 @@ computed by whoever wants it.
 
 **The record carries no rotation, and that is deliberate.** For *generated*
 geometry the orientation belongs in the plan: models are built in a canonical
-frame (+Z along the fastener axis, origin at the seating face, §2.3.3) and the
+frame (+Z along the fastener axis, origin at the seating face, 2.3.3) and the
 record only places them, so an oblique screw is expressed exactly by its plan
 rather than approximately by three angles. `cad_component` carries `rotation`
 because it fits *supplied part files* to footprints, which is the same reason
 this record does not inherit its asset-normalization fields.
 
-That also sidesteps a live defect rather than propagating it. `cad_component.rotation`
-is a bare `point3`: its **units** are implied only by the renderers dividing by
-180/pi, and its **application order is not specified anywhere**. The two shipped
-consumers have each supplied their own, and they differ:
-
-| Consumer | Order | Space |
-| --- | --- | --- |
-| `3d-viewer` | three.js `Euler` default, **XYZ** | circuit space |
-| `circuit-json-to-gltf` | hand-rolled **Y, then X, then Z** (`geometry.ts` `transformMesh`, whose comment concedes "simplified — proper rotation would use quaternions") | scene space, after remapping `{x, z, y}` — so **Z, X, Y** in circuit space |
-
-They agree whenever at most one axis is non-zero, which is every case anyone has
-had reason to test, and diverge only on compound rotations. That is the same
-shape of latent disagreement as the retired `front`/`back` naming: two defensible
-readings, no test that distinguishes them.
-
-The fix does not belong in this record. Making `assembly_component` carry a
-matrix4 would leave the ambiguity in place for every existing record and add a
-*second* convention for every consumer to handle; if the format should move to
-matrices it should move wholesale, starting with `cad_component`, as its own
-circuit-json proposal. (Note that `transformation-matrix`, the workspace's
-existing helper, is 2D — a 4x4 would be a new type as well as a new convention.)
-The cheaper and more urgent fix is to **specify** the order, adopt XYZ as
-canonical since it is three.js's default and what `3d-viewer` already does, and
-correct `transformMesh` to match.
+Deciding that surfaced a defect in `cad_component.rotation` — it declares neither
+a unit nor an Euler application order, and the two shipped renderers apply
+different orders. That is not this RFC's to fix, and adding a matrix or
+quaternion here would leave the ambiguity in place everywhere else while adding a
+second convention. See **`2026-08-14-3d-rotation-semantics.md`**.
 
 **The parent no longer needs a type discriminator.** An earlier draft carried
 `parent_assembly_type: "assembly_device" | "enclosure"` because expanding a node
@@ -371,76 +353,21 @@ the assembly and BOM tree rather than by having been typed into a `.tsx`. That i
 a considerably easier case to make to circuit-json than the five this section
 started with.
 
-**The one mechanism that could have forced a record, and why it does not.**
-Core renders cached subcircuits *in isolation*:
-`Subcircuit_doInitialRenderIsolatedSubcircuits` sets `subcircuit.children = []`,
-replaces the subtree with an `AnyCircuitElement[]` keyed by a prop hash, and
-rebuilds components from those records using the inflators in
-`Group/Subcircuit/inflators/`. There is one inflator per `source_*` type, so
-**anything with no record has nothing to be rebuilt from**. That is core's own
-boundary mid-render, not a persistence question, and it would force a record for
-a reason unrelated to everything above.
+**The one mechanism that could have forced a record, and why it does not.** Core
+renders cached subcircuits *in isolation*, replacing a subtree with Circuit JSON
+and rebuilding it from records. A declaration with no record has nothing to be
+rebuilt from, so `<enclosure.cutoutaperture>` and `<enclosure.screwboss>` inside
+a cached subcircuit were dropped — silently, leaving an enclosure that rendered
+cleanly and was missing a mount. That is core's own boundary mid-render, not a
+persistence question, and it would have forced a record for a reason unrelated to
+everything above.
 
-It is real, and confirmed by A/B rather than by reading: with the guard disabled
-the solver receives only the mount declared *outside* the cached subcircuit
-(`["EN1.H2"]`, one `pcb_hole` where two were declared) and with it restored both
-survive (`["EN1.H1","EN1.H2"]`, two holes). The enclosure renders clean either
-way, which is the whole problem.
-
-Two false starts are worth recording, because both are the same mistake and it
-is an easy one to repeat here: a probe that inspects the component tree by
-guessing at identity proves nothing. `<group subcircuit>` is not the same as
-`<subcircuit>`, and `<subcircuit>` reports `componentName: "Group"` — it is a
-`Subcircuit` instance that never overrides its config — so searching the tree for
-`componentName === "Subcircuit"` finds nothing and reads exactly like "isolation
-did not run".
-
-The resolution is not to add a record but to **decline the optimization**.
-`ephemeral-declarations.ts` marks components that carry no Circuit JSON of their
-own, and isolation skips any subtree containing one. Correctness is not
-negotiable against a cache, and the cache in question is small: measured on
-identical modules, with the flag on versus off,
-
-| identical subcircuits | isolation off | isolation on | speedup |
-| --- | --- | --- | --- |
-| 4 | 274ms | 272ms | 1.00x |
-| 12 | 482ms | 422ms | 1.14x |
-| 24 | 1272ms | 954ms | 1.33x |
-
-so declining it for the subtrees that declare enclosure features costs at most a
-third of the render of those subtrees, in the narrow intersection of "repeated
-many times" and "declares an enclosure feature". Against silently shipping an
-enclosure with a missing mount, that is a rounding error.
-
-**Caching is opt-in, and that is an argument for the guard rather than against
-it.** Verified: the prop is `z.boolean().optional()` with no default, and on a
-subcircuit with nothing set, `_subcircuitCachingEnabled` resolves to `undefined`
-and `_isIsolatedSubcircuit` to `false`. Nothing in the cloned ecosystem — eval,
-cli, runframe — turns it on.
-
-But the switch has a wider surface than one prop. `getInheritedProperty` walks
-*up* the tree, so setting it on a `<board>` or an outer `<group>` enables it for
-every subcircuit beneath; and it then falls back to `root.platform`, through a
-runtime `in` check rather than the `platformConfig` schema, so **a platform can
-enable it globally for code that never mentions it**. A correctness bug that
-appears only once someone flips a platform flag is the worst kind to rely on
-nobody flipping: it is invisible in every local test, and the symptom — an
-enclosure quietly missing a mount — does not look like a caching problem.
-
-Two things found on the way that are worth recording because they are **not**
-enclosure problems:
-
-- **A plain `<hole>` does not survive subcircuit isolation either.** With no
-  enclosure code present, a `<hole>` and a `<resistor>` inside a cached
-  subcircuit yield one `pcb_hole` where two were declared, while the resistor
-  survives: a `pcb_hole` *has* a record but nothing inflates a standalone one
-  back. That is a pre-existing core defect with its own reproduction, and the
-  guard above deliberately does not paper over it -- a hole is not ephemeral, so
-  it is not covered.
-- **Isolation is not output-transparent.** The same 24-module board yields 1949
-  elements with the flag off and 7541 with it on. Whatever the cause, a cache
-  that changes its output by 3.9x is not yet an optimization one should reach
-  for, which further lowers the price of declining it.
+It does not, because isolation can be declined: core now refuses to isolate a
+subtree containing a declaration that carries no Circuit JSON, which costs at
+most a third of that subtree's render on an opt-in path. The measurements, the
+two further data-loss defects the investigation turned up, and what should happen
+to subcircuit caching generally are in
+**`2026-08-14-subcircuit-caching-must-be-lossless.md`**.
 
 #### 1.5.4 Provenance is a reference to *any* element, not to a hole
 
