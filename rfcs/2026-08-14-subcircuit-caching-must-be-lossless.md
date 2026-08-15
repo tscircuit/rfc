@@ -2,7 +2,10 @@
 
 ## Status
 
-Proposed, with one guard already landed in core.
+Proposed, with the general guard landed in core: **isolation is now declined,
+loudly, for any subtree holding something the inflators cannot rebuild.** The
+remaining proposals below are about making that guard fire less often -- by
+making the round trip lossless -- rather than about catching the loss.
 
 Found while deciding whether the enclosure needs durable Circuit JSON records for
 authored intent (`2026-08-14-enclosure-mounting-hardware.md`, 1.5.3). It does
@@ -12,7 +15,8 @@ core's, affects elements with no connection to enclosures, and belongs here.
 | Finding | State |
 | --- | --- |
 | Declarations with no Circuit JSON record are dropped silently | measured; guard landed in core |
-| A plain `<hole>` is dropped too | measured; **unfixed** |
+| A plain `<hole>` is dropped too | measured; no longer silent -- caching is declined; inflator still **unfixed** |
+| An `ftype` with no case in the inflator switch (`<pinheader>`) threw mid-render | caching is declined before it can throw |
 | Caching changes the element count by 3.9x | measured; unexplained |
 | Measured speedup: 1.00x - 1.33x for 4 - 24 identical modules | measured |
 | Proposal: make the round trip lossless, or refuse to take it | proposed |
@@ -94,7 +98,7 @@ carry no Circuit JSON, and isolation skips any subtree containing one.
 Correctness is not negotiable against a cache worth 1.33x. The marker is general,
 so a future ephemeral element is covered by setting one flag.
 
-### 2. A plain `<hole>` — unfixed
+### 2. A plain `<hole>` — no longer silent, still uninflatable
 
 This one has nothing to do with enclosures. With no enclosure code present, a
 `<hole>` and a `<resistor>` inside a cached subcircuit yield:
@@ -106,23 +110,53 @@ source_components: ["R1"]
 
 The resistor survives; the hole does not. A `pcb_hole` *does* have a record — it
 is `inflateStandalonePcbPrimitives` that does not bring a standalone one back.
-The guard above deliberately does not cover this: a hole is not ephemeral, and
-papering over a missing inflator with "do not cache" would hide a defect that
-should be fixed properly.
 
-### 3. Anything else nobody has checked
+That is still true, and still a defect to fix. What has changed is that it no
+longer costs a wrong board: a subcircuit containing a `<hole>` is not cached, and
+says why. "Do not cache" is not a fix for the missing inflator — proposal 1
+below stands — but it is the difference between a slow board and a wrong one.
+
+### 3. Anything else nobody has checked — now declined by default
 
 Those two were found by looking. The architecture — one inflator per record type,
 silent omission for everything else — means the set of things that survive is
 whatever inflators happen to exist, and no test compares the two paths in
 general.
 
+**Landed:** `Group/Subcircuit/isolation-round-trip.ts` inverts the default. It
+holds an allowlist keyed by `componentName`, whose *value* names the inflator
+that rebuilds each entry, so the pairing with `inflate-circuit-json.ts` can be
+checked by reading. A subtree is isolated only when every declaration in it is
+on that list; anything else renders normally and warns once per circuit, naming
+the offending components and why each cannot come back:
+
+```
+⚠️ subcircuit caching disabled for <group#14 name=".module" />: it contains 1
+   declaration(s) that cannot be rebuilt from Circuit JSON, and caching would
+   silently drop them:
+  - <hole#0(.module>.H1) /> has no inflator, so nothing rebuilds it from its
+    Circuit JSON record
+  This subcircuit rendered normally instead (correct output, no cache).
+```
+
+The walk stops at components the inflators rebuild whole — a chip's footprint,
+pads and ports come back with the chip, so they are not separate declarations to
+vet — but it keeps descending for ephemeral declarations, which have nowhere to
+come back from at any depth.
+
+The cost of being wrong is now asymmetric in the safe direction. A missing entry
+means a cache miss; an entry that should not be there means a wrong board. So
+the list is short and grows only with evidence — proposal 3 is what that
+evidence should look like.
+
 ---
 
 ## Proposal
 
 **1. Fix the standalone-primitive inflation.** A `<hole>`, and by extension every
-standalone PCB primitive declared directly in a subcircuit, must come back.
+standalone PCB primitive declared directly in a subcircuit, must come back. Until
+then the guard declines to cache those subcircuits, which is a slowdown standing
+in for a defect, not a fix for it.
 
 **2. Explain or fix the element-count divergence.** A transparent cache produces
 the same document. Until the 3.9x is understood, it is not one.
@@ -133,9 +167,12 @@ fixture both ways and diffs the Circuit JSON would have caught all three finding
 here, and is the only thing that will catch the fourth. Differences that are
 legitimate (ids, ordering) need normalizing once; everything else is a bug.
 
-**4. Keep the ephemeral guard regardless.** Even with lossless inflation, a
-declaration with no record cannot survive a round trip through records. That is
-not a bug to fix but a property to respect, and the guard is how it is respected.
+**4. Keep the guard regardless.** Even with lossless inflation, a declaration
+with no record cannot survive a round trip through records. That is not a bug to
+fix but a property to respect, and the guard is how it is respected. The same
+applies to the general form: a cache that opts in only to what it can prove it
+rebuilds stays correct as elements are added to core by people who have never
+heard of it.
 
 **5. Consider whether the platform fallback should be able to reach this flag.**
 An optimization that can be enabled globally, invisibly to the author, and that
