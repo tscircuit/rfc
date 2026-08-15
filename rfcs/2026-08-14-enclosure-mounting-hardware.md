@@ -644,8 +644,19 @@ and deliberately reuse footprinter's grammar — segments joined by `_`, each a
 name with an optional numeric value — so one grammar covers both vocabularies:
 
 ```
-screw_m3_l8_socketcap        insert_m3_l5.7_heatset        spacer_od6_id3.2_l6.3
+screw_m3_l8mm_socketcap   insert_m3_l5.7mm_heatset   spacer_od6mm_id3.2mm_l7.5mm
 ```
+
+Dimensions carry their unit, as footprinter's do, and both directions reuse
+`format-si-unit`: `formatMm` writes them and `parseAndConvertSiUnit` reads them
+back. That is not incidental tidiness. `formatMm` already rounds floating-point
+dust to three decimals, which is exactly what an identity needs — a gap derived
+as `totalHeight - lidThickness - boardTopZ` arrives as 7.500000000000002, and a
+string carrying that noise makes two spacers of the same real length into
+different parts. And parsing through `parseAndConvertSiUnit` rather than
+`Number` means a hand-written `l0.25in` resolves to 6.35mm instead of 0.25 —
+the `toMm`-versus-`parseFloat` defect the workspace guide uses as its worked
+example, which this DSL walked straight into on the first draft.
 
 **Why generate rather than fetch, for these parts specifically.** A fastener's
 shape is *entirely implied by its specification* — that is the premise of §2.1 —
