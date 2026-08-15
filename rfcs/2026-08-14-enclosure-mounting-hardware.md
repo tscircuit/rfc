@@ -60,15 +60,15 @@ for (const elm of circuitJson) {
 
 Three consequences, all load-bearing:
 
-1. **EBOM membership is already structural, not a flag.** A record with no
-   `pcb_component` cannot appear. The existing BOM is *the PCBA BOM by
+1. **EBOM membership is structural based on pcb_component.** A record with no
+   `pcb_component` cannot appear in the BOM. The existing BOM is *the PCBA BOM by
    construction*.
 2. **Identity is `source_component`'s**: designator, MPN, supplier part numbers,
    display value.
 3. **One row per occurrence.** Quantity is implicit; grouping is a downstream
    rendering concern.
 
-Enclosures are already violating (1). Rendering a board with one resistor plus an
+Enclosures are abusing (1). Rendering a board with one resistor plus an
 `<enclosure.fdm.box name="EN1">` and running the real converter over the output
 gives:
 
@@ -90,7 +90,7 @@ components required to assemble the device: the enclosure parts, and all mountin
 ### 1.2 There is no "second BOM per part"
 
 A BOM should belong to an **assembly** and lists what that
-assembly consumes; a part appears in exactly one. This is the ordinary
+assembly consumes; a single part appears in exactly one. This is the ordinary
 item-master/structure model, and the reason a screw is absent from the board's
 BOM is not that it is "mechanical" -- it is that *the board assembly does not
 consume it*:
@@ -109,31 +109,29 @@ device "controller"                            <- final assembly
                                                   subassembly
 ```
 
-Three levels, not two, and the middle one is load-bearing. An earlier draft of
-this RFC drew the enclosure's parts as siblings of the PCBA at the device level
-and made the enclosure a nullable *attribute* of each part -- which contradicts
-the principle in the first sentence of this section. The enclosure is an
-assembly by every test that matters: it is built as a unit, by a vendor who
-never sees the board, from a bill you can order on its own.
+Every component that belongs to a top-level assembly.device tag (board, enclosure,
+and more subassemblies later) could have its own BOM; the BOM for PCBA is already
+built; we are proposing to build the BOM for the enclosure components, but not
+other subcomponents of the device assembly, such as ribbon cables.
 
 Each assembly's BOM goes to the vendor that builds that assembly. That is the
-user-visible distinction we want, and it falls out of the structure rather than
+user-visible distinction we want, and it emerges from the structure rather than
 being asserted by a field.
 
 **Which node owns a part: whatever generates the requirement.** The screws are
 worth stating explicitly, because sequencing puts them somewhere else. Ordered by
 operation, the inserts are pressed into the base before anything else -- an
 enclosure operation -- while the screws are driven only once the board is in the
-box, which is a final-assembly operation, so an operation-accurate MBOM would
-hang the screws off the *device*. They go under the enclosure anyway: they exist
-because the enclosure has bosses, they are specified by the enclosure design,
+box, which is a final-assembly operation, so an process-following MBOM would
+hang the screws off the *device*. We decide that they go under the enclosure: they
+exist because the enclosure has bosses, they are specified by the enclosure design,
 they are ordered with the rest of the box hardware, and deleting the enclosure
 deletes them. **Structure by what generates the requirement; sequence by the bill
 of process.** Part 5 shows that the sequence is *derivable* from what the solver
 already computes, which is what makes this a presentation choice rather than a
 structural commitment: the tree groups by requirement, a derived process says
 when each piece is consumed, and an operation-sequenced MBOM is then a different
-fold over the same tree rather than a different tree.
+expression of the same tree.
 
 ### 1.3 Hardware is identified by specification, not by MPN
 
@@ -162,20 +160,16 @@ The PCBA BOM is then correct by construction: `circuit-json-to-bom-csv` needs no
 change and cannot accidentally include hardware, and no future consumer has to
 remember to filter. This is opt-**in** where a category flag would be opt-**out**.
 
-### 1.5 Proposed Circuit JSON records — generic, and deliberately not implemented
+### 1.5 Proposed Circuit JSON records — generic, deliberately not implemented
 
 These records are **proposed, not committed**. The implementation described in
-Part 3 proceeds without them: hardware lives in the solver output only, and no
-`circuit-json` change is made until the set below has been reviewed on its own
-merits.
+Part 3 proceeds without them: hardware currently lives in the solver output only,
+and no `circuit-json` change is made until the set below has been adopted.
 
-The design principle is that what matters about a printed enclosure part is that
-it is **a member item of an assembly device that is not on the board** — not
-that it was made by FDM. A record per manufacturing process (`cad_fdm_enclosure`,
-and a `cad_cnc_enclosure` behind it, and a `cad_sheet_metal_enclosure` behind
-that) would encode a process taxonomy into the interchange format that the
-authoring namespace should not need to commit to. So the process
-becomes a **field**, not a record type:
+First, `cad_fdm_enclosure` was originally proposed as the circuit-json element
+to store the metadata about the FDM enclosure; however, that would encode a
+process taxonomy into the interchange format that the authoring namespace should
+not need to commit to. So the process should be a **field**, not a record type:
 
 ```ts
 /** Product-level root. One per assembly.device. */
@@ -232,11 +226,6 @@ interface AssemblyPart {
   parent_assembly_id: string
 
   name: string                       // "EN1.base", "EN1.H1.screw"
-  /** The make/buy axis every MBOM has. */
-  supply_method: "fabricated" | "purchased"
-  part_category:
-    | "enclosure_shell" | "screw" | "insert" | "washer" | "nut" | "spacer"
-    | "cable" | string
 
   /** Specification identity. Groups BOM lines when no MPN exists. */
   designation?: string               // "ISO 4762 M3x0.5x8 A2-70"
@@ -244,9 +233,11 @@ interface AssemblyPart {
   manufacturer_part_number?: string
   supplier_part_numbers?: Partial<Record<SupplierName, string[]>>
 
-  /** Traceability back to the board feature that generated it. */
-  pcb_hole_id?: string
-  source_component_id?: string
+  /**
+   * The element whose existence requires this part — the mounting hole behind a
+   * screw, the pin header behind a jumper wire. See §1.5.2.
+   */
+  generated_by?: CircuitJsonElementRef
 
   /** Placement in the device frame, and the geometry to draw. */
   position: Point3
