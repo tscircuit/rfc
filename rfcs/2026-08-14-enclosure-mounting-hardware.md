@@ -171,7 +171,9 @@ Circuit JSON already has a tree. Rendering a board containing a subcircuit gives
 source_group_1  name "b"    is_subcircuit          <- the board
 source_group_0  name "sub"  parent source_group_1  <- nested subcircuit
 source_component R1  source_group_id source_group_0
-pcb_board  ->  source_board.source_group_id  ->  the group tree
+source_board.source_group_id  ->  the group tree
+pcb_board                     ->  carries source_board_id at runtime, though the
+                                  zod schema does not declare it
 ```
 
 That tree is *functional*: it nests subcircuits, carries `subcircuit_id` and
@@ -220,6 +222,12 @@ interface AssemblyComponent {
   designation: string
   display_value?: string
   manufacturer_part_number?: string
+  /**
+   * Note `SupplierName` is a closed enum of PCB suppliers (jlcpcb, macrofab,
+   * pcbway, digikey, mouser, lcsc) and cannot name McMaster-Carr or Fastenal.
+   * Mechanical vendors need it opened or a separate identifier before this
+   * field is useful here.
+   */
   supplier_part_numbers?: Partial<Record<SupplierName, string[]>>
 
   /** See §3.3.2: `each` for discrete pieces, `mm` for stock consumed by length. */
@@ -243,7 +251,6 @@ interface AssemblyComponent {
 
   /** only leaves carry these — see below. */
   position?: Point3
-  rotation?: Point3
   hardware_string?: string           // "screw_m3_l8mm_socketcap", see §2.3.3
   model_jscad?: unknown
   model_step_url?: string
@@ -355,7 +362,7 @@ Hardware is specified the way vendors sell it, along orthogonal axes:
 | Axis | Values | Determines |
 | --- | --- | --- |
 | `thread` | `M2` `M2.5` `M3` `M4` `M5` (imperial later) | clearance hole, pilot hole, insert bore, head dimensions |
-| `fastening` | `heat_set_insert` `press_fit_insert` `self_tapping` `machine_screw_nut` | how the boss is bored and what hardware is consumed |
+| `fastening` | `heat_set_insert` `press_fit_insert` `self_tapping` | how the boss is bored and what hardware is consumed |
 | `head` | `socket_cap` `countersunk` `pan` `button` | head Ø/height, and which recess is legal |
 | `headRecess` | `none` `countersink` `counterbore` | geometry cut into the part the head bears on |
 | `length` | distance, **normally omitted** | derived from the stack; see §2.3 |
@@ -371,9 +378,13 @@ sugar over these axes.
 The decisive constraint, and the one that makes this more than a table of
 standards:
 
-> **A specification may exist in the catalogue only if a real vendor sells that
-> exact combination** of thread, pitch, length, head style, drive, material and
-> finish.
+> **A specification may exist in the catalogue only if a real vendor stocks it.**
+
+The axes the catalogue represents today are thread, head style and length; drive,
+material and finish are fixed per head style by picking one commodity series, and
+are not yet expressible. Until they are, a designation names less than a purchase
+order needs, and the entries carry no part numbers -- so "vendor-backed" describes
+the rule the catalogue is curated under, not a property any consumer can check.
 
 Standards tables describe what a conforming part *would* measure. They do not
 tell you that an M2.5×14 countersunk A2 screw is stocked anywhere, and a
@@ -454,9 +465,12 @@ material thicknesses, board thickness, head seat, insert depth. But real screws
 come in steps, so the derivation has two stages and a validation:
 
 ```
-exact  = headSeatDepth + Σ(clamped material) + requiredEngagement
+exact  = Σ(clamped material) − headSeatDepth + requiredEngagement
 chosen = the smallest stocked length ≥ exact
 ```
+
+`headSeatDepth` is **subtracted**: a recess buries the head, so the screw enters
+the material that much lower and needs that much less length under it.
 
 with `requiredEngagement` a property of the fastening method:
 
@@ -752,7 +766,7 @@ spec:spacer nylon 6x3.2x6         a stocked 6mm piece
 spec:spacer-stock nylon 6x3.2     stock, whatever it was cut to
 ```
 
-Four mounts needing 7.5mm each are therefore **one line of 15mm of stock**, not
+Four mounts needing 7.5mm each are therefore **one line of 30mm of stock**, not
 four line items naming a part number nobody sells. The cut list is not lost by
 that fold: it is the occurrences, which a consumer already holds. Cut stock
 overage estimation is recommended but left to be implemented later.
