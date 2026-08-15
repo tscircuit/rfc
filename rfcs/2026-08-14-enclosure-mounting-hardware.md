@@ -256,6 +256,52 @@ interface AssemblyPart {
 }
 ```
 
+### 1.5.1 Two kinds of edge, and only one new record
+
+An assembly tree has two kinds of edge, and they are not expressed the same way:
+
+| Edge | Meaning | Expressed as |
+| --- | --- | --- |
+| assembly contains **subassembly** | the device contains this enclosure, and this board | a parent pointer on the *node* record: `source_enclosure.source_assembly_device_id`, plus a new `pcb_board.source_assembly_device_id` |
+| assembly consumes **item** | this enclosure consumes 8 screws | one `assembly_part` per piece, carrying its parent |
+
+So the structure costs one new relationship on an existing record — `pcb_board`
+gains an optional device pointer, since nothing links a board to the device that
+contains it today — and the parent on `assembly_part`. The PCBA line in the
+device MBOM is then *derived* from the board node being under the device, rather
+than being a second record that could drift out of agreement with the board it
+names.
+
+This is also the answer to daughterboards, ribbon cables, and anything else that
+belongs to the device but not to the enclosure: they are `assembly_part`s whose
+parent is the **device**, or — when they have internal structure worth expanding —
+a further node kind with parts beneath them. Nothing about the enclosure is
+privileged in the shape; it is simply the first subassembly we generate.
+
+**The honest gap:** that third bucket is *representable* but not yet
+*authorable*. No TSX element produces a device-level part, so a ribbon cable can
+be modelled but not declared. Filling it means an authoring element for hardware
+nobody generates (`assembly.part`, or similar), which this RFC does not propose —
+the enclosure generates its own parts, and designing a manual-entry element
+beside it would be building for a use case nobody has exercised. It is named here
+so the shape is checked against it now rather than surprised by it later.
+
+`assembly_part` carries its own geometry rather than borrowing `cad_component`,
+for the reason the parametric-enclosures RFC already gives: `cad_component`'s
+asset-normalization fields (`model_origin_alignment`,
+`model_board_normal_direction`, `model_object_fit`, `anchor_alignment`) describe
+how to fit *a supplied part file to a footprint*. A generated plan is already
+authored in device coordinates, so `position` alone places it, and none of those
+fields have a meaning to give. The alternative — relaxing
+`cad_component.pcb_component_id` to optional — is a wider change that turns a
+`string` into `string | undefined` for every existing consumer, and it would
+still leave the footprint-fitting fields meaningless on these records.
+
+The proposal deliberately does **not** add a record for the authored screw-boss
+intent yet. Part-owned intent records (`source_cutout_aperture` and a
+hypothetical `source_enclosure_mount`) are a separate question that the
+parametric-enclosures RFC already owns; nothing here is blocked on it.
+
 ### 1.5.2 Provenance is a reference to *any* element, not to a hole
 
 An earlier draft traced a part with `pcb_hole_id` and `source_component_id`. Both
@@ -310,52 +356,6 @@ the truest available reference is that component, or the specific pad or hole.
 Making a reference generic does not conjure elements the format does not have, and
 a record wanting real footprint provenance would need circuit-json to grow one
 first.
-
-### 1.5.1 Two kinds of edge, and only one new record
-
-An assembly tree has two kinds of edge, and they are not expressed the same way:
-
-| Edge | Meaning | Expressed as |
-| --- | --- | --- |
-| assembly contains **subassembly** | the device contains this enclosure, and this board | a parent pointer on the *node* record: `source_enclosure.source_assembly_device_id`, plus a new `pcb_board.source_assembly_device_id` |
-| assembly consumes **item** | this enclosure consumes 8 screws | one `assembly_part` per piece, carrying its parent |
-
-So the structure costs one new relationship on an existing record — `pcb_board`
-gains an optional device pointer, since nothing links a board to the device that
-contains it today — and the parent on `assembly_part`. The PCBA line in the
-device MBOM is then *derived* from the board node being under the device, rather
-than being a second record that could drift out of agreement with the board it
-names.
-
-This is also the answer to daughterboards, ribbon cables, and anything else that
-belongs to the device but not to the enclosure: they are `assembly_part`s whose
-parent is the **device**, or — when they have internal structure worth expanding —
-a further node kind with parts beneath them. Nothing about the enclosure is
-privileged in the shape; it is simply the first subassembly we generate.
-
-**The honest gap:** that third bucket is *representable* but not yet
-*authorable*. No TSX element produces a device-level part, so a ribbon cable can
-be modelled but not declared. Filling it means an authoring element for hardware
-nobody generates (`assembly.part`, or similar), which this RFC does not propose —
-the enclosure generates its own parts, and designing a manual-entry element
-beside it would be building for a use case nobody has exercised. It is named here
-so the shape is checked against it now rather than surprised by it later.
-
-`assembly_part` carries its own geometry rather than borrowing `cad_component`,
-for the reason the parametric-enclosures RFC already gives: `cad_component`'s
-asset-normalization fields (`model_origin_alignment`,
-`model_board_normal_direction`, `model_object_fit`, `anchor_alignment`) describe
-how to fit *a supplied part file to a footprint*. A generated plan is already
-authored in device coordinates, so `position` alone places it, and none of those
-fields have a meaning to give. The alternative — relaxing
-`cad_component.pcb_component_id` to optional — is a wider change that turns a
-`string` into `string | undefined` for every existing consumer, and it would
-still leave the footprint-fitting fields meaningless on these records.
-
-The proposal deliberately does **not** add a record for the authored screw-boss
-intent yet. Part-owned intent records (`source_cutout_aperture` and a
-hypothetical `source_enclosure_mount`) are a separate question that the
-parametric-enclosures RFC already owns; nothing here is blocked on it.
 
 ### 1.6 Three BOM queries, one walk
 
