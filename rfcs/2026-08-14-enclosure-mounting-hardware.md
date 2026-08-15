@@ -25,9 +25,9 @@ without interfering with the board's electrical BOM.
 | Spacers, stocked or cut from stock, and length-based BOM units | **implemented** |
 | Hardware DSL like footprinter, and generated geometry for purchased parts | **implemented** |
 | Vendor CAD (McMaster) for non-parametric families | proposed; blocked on a licensing answer, not on format support |
-| Core reads bosses declared on holes and on the enclosure | **implemented** |
+| Core reads bosses declared on holes | **implemented** |
 | A durable Circuit JSON record for assembly parts (one, self-nesting) | **proposed only, deliberately not implemented** |
-| Records for authored aperture/boss intent | **argued against and not needed** (1.5.3) |
+| Records for authored aperture/boss intent | not proposed; apertures and bosses are solver inputs, consumed during the render |
 | `getPcbaBom` / `getEnclosureBom` / `getDeviceMbom` | proposed, blocked on the circuit-json records |
 | Core lowering of hardware geometry into CAD | not started |
 | Boss-versus-component and boss-versus-aperture collision checks | not started |
@@ -199,9 +199,8 @@ interface AssemblyComponent {
   assembly_component_id: string
 
   /**
-   * The assembly that consumes it. Absent on the root, and the root is
-   * therefore the device: a named part with no parent, which is all
-   * `source_assembly_device` ever was.
+   * The assembly that consumes it. Absent on the root, which is therefore the
+   * device: a named part with no parent.
    */
   parent_assembly_component_id?: string
 
@@ -230,8 +229,17 @@ interface AssemblyComponent {
   /** How a *fabricated* part is made. A property of the part, not of the assembly. */
   manufacturing_process?: "fdm" | string
 
-  /** The element whose existence requires this part (§1.5.4). */
-  generated_by?: CircuitJsonElementRef
+  /**
+   * The element whose existence requires this part -- the mounting hole behind a
+   * screw, the pin header behind a jumper wire. Generic because the enclosure is
+   * only the first thing to generate parts.
+   */
+  generated_by?: {
+    /** The element's `type`, e.g. "pcb_hole". */
+    element_type: string
+    /** The value of that element's own `<type>_id` field. */
+    element_id: string
+  }
 
   /** only leaves carry these — see below. */
   position?: Point3
@@ -436,7 +444,7 @@ than props also preserves the parametric-enclosures RFC's XML-compatibility rule
 `manufacturerPartNumber` / `supplierPartNumbers` attributes as an escape hatch.
 
 Because entries are vendor-backed there is no "generic hardware with no
-procurement identity", so no `generic` flag and no `bomMode` gate. The MBOM is
+procurement identity", so nothing to flag and nothing to disable. The MBOM is
 always built.
 
 ### 2.3 Screw length is derived, then rounded to a stocked length
@@ -496,14 +504,13 @@ and is not a clearance at all.
 | --- | --- | --- |
 | the lid's clearance hole | ISO 273 **medium** (3.4mm for M3) | we generate it, and a printed part wants assembly slop |
 | the PCB's mounting hole | validated against ISO 273 **fine** (3.2mm for M3) | the board fab made it to the layout's number, and 3.2mm for an M3 is what practically every layout uses; demanding 3.4mm would reject almost every real board while the screw passes through perfectly well |
-| a bought spacer's bore | validated against ISO 273 **fine** | a spacer is deliberately a close fit, so it stays concentric with the screw |
+| a purchased spacer's internal diameter | validated against ISO 273 **fine** | a spacer is deliberately a close fit, so it stays concentric with the screw |
 
 The rule is not about who made the hole; it is about **whether the dimension is
 ours to choose**. We size what we generate at the medium series, and validate what
 we inherit against the fine one.
 
-**The boss bore is none of these**, and it is worth stating because it is the
-feature people picture first. It is the recess the screw threads into, sized from
+**The boss bore** is the recess the screw threads into, sized from
 the fastening method rather than from a clearance series:
 
 | Fastening | Bore | Source |
@@ -520,7 +527,7 @@ is why they come from different tables.
 | Recess | Depth | For an M3 |
 | --- | --- | --- |
 | counterbore | the head's height | 3mm |
-| countersink | `(headDiameter − clearanceDiameter) / 2` | 1.1mm, because a 90° cone descends 1mm per 1mm of radius |
+| countersink | `(headDiameter − clearanceDiameter) / 2` | 1.1mm, because a 45° cone descends 1mm per 1mm of radius |
 
 The countersink is *shallower than the head is tall*, because the lower part of
 the head sits inside the clearance hole rather than in the cone. Cutting the cone
@@ -586,9 +593,9 @@ accepts auth headers, and reads `model_step_url`); what is missing is a licensin
 answer, since the EasyEDA integration *mirrors* vendor models onto
 `modelcdn.tscircuit.com`.
 
-**Open question.** The hardware string and the `designation` are both canonical
-total identities of the same part, which is one too many. The string is the better
-*key* -- parseable, and extensible along new axes (`_a2` for material) where
+**Open question.** The hardware dsl string and the `designation` are both canonical
+total identities of the same part, which is one too many. The dsl string is the better
+*key* -- parseable, and extensible along new axes (e.g. `_a2` for material) where
 "ISO 4762 M3x8" has no slot -- and the designation is the better *label*. Folding
 them changes every BOM group key, so it deserves its own decision.
 
@@ -661,11 +668,6 @@ const MountingHole = (props: HoleProps) => (
 </board>
 ```
 
-Composition needs no new concept, is typed, and the component is reusable across
-boards. A selector form (`<enclosure.screwboss for=".H*">`) would buy terser
-declarations at the cost of a second grammar for expressing which elements a
-declaration applies to.
-
 Requires one props change: `holeProps` and `platedHoleProps` gain
 `children?: any`, which `commonComponentProps` already provides for normal
 components. Nothing is added to `enclosureFdmBoxProps`: the enclosure hosts no
@@ -716,16 +718,6 @@ fill that gap, and the choice is `lidColumn`:
 | `spacer` | a bought nylon tube | one BOM line; see §3.3.2 for why its length is not a constraint on the enclosure |
 | `none` | nothing — the screw crosses open air | the lid seats on the walls as it always did, and the board is held by whatever `board` mounts it has |
 
-**The column cannot belong to the base**, and this constraint decides the whole
-feature: a column standing up from the floor would occupy the hole the board has
-to be lowered over, so the board could never be installed. Printing it on the lid
-is what makes a one-screw board-and-lid stack assemblable, and it makes the lid
-the first part here to be *added to* rather than only cut.
-
-The column does not change the screw — it fills a span the screw had to cross
-either way, so `printed` and `none` resolve to the same length and differ only in
-what is clamped.
-
 The one dimension that still acquires a mount-derived minimum is `lidThickness`,
 under the existing rule — grow what the author did not state, hold what they did
 to the same minimum with an actionable error — because what remains under a head
@@ -762,7 +754,8 @@ spec:spacer-stock nylon 6x3.2     stock, whatever it was cut to
 
 Four mounts needing 7.5mm each are therefore **one line of 15mm of stock**, not
 four line items naming a part number nobody sells. The cut list is not lost by
-that fold: it is the occurrences, which a consumer already holds.
+that fold: it is the occurrences, which a consumer already holds. Cut stock
+overage estimation is recommended but left to be implemented later.
 
 ### 3.3.3 Geometry contributions
 
@@ -800,17 +793,22 @@ New FDM rules, all injectable like the existing profile:
 | --- | --- |
 | `minInsertWallMm` | printed wall around an insert bore; sets boss OD when not given |
 | `insertMeltReliefMm` | extra bore depth below an insert for displaced plastic |
-| `selfTapPilotDepthMm` | pilot depth beyond the required engagement |
+| `selfTapPilotReliefMm` | pilot depth beyond the required engagement |
 | `minFloorUnderBoreMm` | material that must remain below a blind bore |
 | `headRecessClearanceMm` | diametral clearance in a counterbore |
+| `minMaterialUnderHeadRecessMm` | material that must remain under a head recess |
 
-Validations that produce errors rather than geometry:
+Validations that produce errors rather than geometry. Implemented:
 
-- PCB hole diameter smaller than the screw's clearance diameter;
-- boss colliding with a component body, an aperture, or the board edge;
-- bore leaving less than `minFloorUnderBoreMm` of floor;
-- boss outer diameter not fitting inside the cavity;
-- a rounded screw length violating its engagement or protrusion bound (§2.3).
+- a PCB hole too small to pass the screw shank;
+- a bore that would leave less than `minFloorUnderBoreMm` of floor, which selects
+  a shorter insert series before it becomes an error;
+- a rounded screw length violating its engagement or protrusion bound (§2.3);
+- a head recess deeper than the lid can carry, which grows an unstated
+  `lidThickness` before it becomes an error;
+- `lidColumn` on a mount that fastens the board.
+
+Not yet: boss against a component body, an aperture, or the board edge.
 
 ---
 
@@ -825,8 +823,8 @@ Validations that produce errors rather than geometry:
    `hardware: HardwareOccurrence[]` — the occurrence data of §1.5 as plain data,
    minus the record type and ids. Designing this now is what makes Stage 2 a
    lowering rather than a redesign. **Done.**
-3. Core reads `<enclosure.screwboss>` from the holes and from the enclosure and
-   feeds the solver. **Done.**
+3. Core reads `<enclosure.screwboss>` from the holes and feeds the solver.
+   **Done.**
 4. Core lowers hardware **geometry only**, as `cad_component`s reusing the
    enclosure box's *existing* synthetic owner. Several `cad_component`s may
    already share one PCB owner — base and lid do exactly that today — so N screws
@@ -841,9 +839,9 @@ they are. That is one phase's gap, and it is precisely what Stage 2 closes.
 `getDeviceMbom` to `circuit-json-util`; move enclosure shells off `pcb_component`
 ownership, which also removes the stray `EN1` row measured in §1.1.
 
-**Later.** Vendor adapters for the hardware engine; imperial threads; standoffs,
-spacers and captive nuts; device-level items (labels, thermal pads, packaging)
-as further `assembly_component` categories.
+**Later.** Vendor adapters for the hardware engine; imperial threads; standoffs
+and captive nuts; device-level items (labels, thermal pads, packaging) as further
+`assembly_component`s.
 
 ---
 
