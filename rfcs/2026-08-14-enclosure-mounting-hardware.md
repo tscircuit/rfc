@@ -212,13 +212,6 @@ A physical assembly tree is a tree of *items*, and a subassembly is an item that
 has children. So the record nests into itself, and that one change removes the
 other two.
 
-Named `assembly_component` rather than `assembly_part` to follow the convention
-the format already uses: `source_component`, `pcb_component`,
-`schematic_component` and `cad_component` are each *a component in one domain*,
-so this is the component in the assembly domain. "Part" is the more natural word
-in MBOM language, but it would be the only record in circuit-json spelled that
-way, and consistency inside the format beats borrowing a term from outside it.
-
 ```ts
 /**
  * One physical member item of a device: a printed shell, a screw, a spacer, a
@@ -288,6 +281,39 @@ an assembled plan, but a renderer given both a subassembly's mesh and its
 children's would draw the enclosure twice, and the two would drift the moment a
 child changed. Geometry lives on leaves; an assembled preview is a union of them,
 computed by whoever wants it.
+
+**The record carries no rotation, and that is deliberate.** For *generated*
+geometry the orientation belongs in the plan: models are built in a canonical
+frame (+Z along the fastener axis, origin at the seating face, §2.3.3) and the
+record only places them, so an oblique screw is expressed exactly by its plan
+rather than approximately by three angles. `cad_component` carries `rotation`
+because it fits *supplied part files* to footprints, which is the same reason
+this record does not inherit its asset-normalization fields.
+
+That also sidesteps a live defect rather than propagating it. `cad_component.rotation`
+is a bare `point3`: its **units** are implied only by the renderers dividing by
+180/pi, and its **application order is not specified anywhere**. The two shipped
+consumers have each supplied their own, and they differ:
+
+| Consumer | Order | Space |
+| --- | --- | --- |
+| `3d-viewer` | three.js `Euler` default, **XYZ** | circuit space |
+| `circuit-json-to-gltf` | hand-rolled **Y, then X, then Z** (`geometry.ts` `transformMesh`, whose comment concedes "simplified — proper rotation would use quaternions") | scene space, after remapping `{x, z, y}` — so **Z, X, Y** in circuit space |
+
+They agree whenever at most one axis is non-zero, which is every case anyone has
+had reason to test, and diverge only on compound rotations. That is the same
+shape of latent disagreement as the retired `front`/`back` naming: two defensible
+readings, no test that distinguishes them.
+
+The fix does not belong in this record. Making `assembly_component` carry a
+matrix4 would leave the ambiguity in place for every existing record and add a
+*second* convention for every consumer to handle; if the format should move to
+matrices it should move wholesale, starting with `cad_component`, as its own
+circuit-json proposal. (Note that `transformation-matrix`, the workspace's
+existing helper, is 2D — a 4x4 would be a new type as well as a new convention.)
+The cheaper and more urgent fix is to **specify** the order, adopt XYZ as
+canonical since it is three.js's default and what `3d-viewer` already does, and
+correct `transformMesh` to match.
 
 **The parent no longer needs a type discriminator.** An earlier draft carried
 `parent_assembly_type: "assembly_device" | "enclosure"` because expanding a node
