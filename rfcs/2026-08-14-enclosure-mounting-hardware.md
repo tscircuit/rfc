@@ -109,6 +109,13 @@ device "controller"                            <- final assembly
                                                   subassembly
 ```
 
+`MAKE` and `BUY` are shown because the distinction is real and an assembler acts
+on it, but note that it is **derived, not stored**: a part carrying a
+specification designation is bought, and a part carrying generated geometry and no
+designation is made. This RFC keeps choosing derivation over storage — BOM views
+are queries (§1.6), the assembly sequence is derived (Part 5), and make/buy is a
+read of what the part already carries.
+
 Every component that belongs to a top-level assembly.device tag (board, enclosure,
 and more subassemblies later) could have its own BOM; the BOM for PCBA is already
 built; we are proposing to build the BOM for the enclosure components, but not
