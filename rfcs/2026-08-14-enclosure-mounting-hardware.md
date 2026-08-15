@@ -20,7 +20,7 @@ without interfering with the board's electrical BOM.
 | `enclosure.screwboss` authoring props | **implemented** (`props`) |
 | Vendor-backed fastener catalogue and screw-length derivation | **implemented** (`create-fdm-enclosure/lib/hardware/`) |
 | PCB mounting bosses (heat-set / press-fit / self-tapping) | **implemented** |
-| Lid screw columns with countersink / counterbore head recesses | **implemented** |
+| Lid screws through a PCB hole, with countersink / counterbore recesses | **implemented** |
 | Hardware occurrences in the solver output | **implemented** (`CreateFdmEnclosureOutput.hardware`) |
 | Core reads bosses declared on holes and on the enclosure | **implemented** |
 | Durable Circuit JSON records for assembly parts | **proposed only, deliberately not implemented** |
@@ -242,8 +242,8 @@ interface AssemblyPart {
   supplier_part_numbers?: Partial<Record<SupplierName, string[]>>
 
   /**
-   * The element whose existence requires this part — the mounting hole behind a
-   * screw, the pin header behind a jumper wire. See §1.5.2.
+   * The element who carries the declaration requiring this part
+   * See §1.5.2.
    */
   generated_by?: CircuitJsonElementRef
 
@@ -275,17 +275,9 @@ names.
 
 This is also the answer to daughterboards, ribbon cables, and anything else that
 belongs to the device but not to the enclosure: they are `assembly_part`s whose
-parent is the **device**, or — when they have internal structure worth expanding —
-a further node kind with parts beneath them. Nothing about the enclosure is
-privileged in the shape; it is simply the first subassembly we generate.
-
-**The honest gap:** that third bucket is *representable* but not yet
-*authorable*. No TSX element produces a device-level part, so a ribbon cable can
-be modelled but not declared. Filling it means an authoring element for hardware
-nobody generates (`assembly.part`, or similar), which this RFC does not propose —
-the enclosure generates its own parts, and designing a manual-entry element
-beside it would be building for a use case nobody has exercised. It is named here
-so the shape is checked against it now rather than surprised by it later.
+parent is the **device**, or — when they have internal structure that requires
+expansion, a further node kind with parts beneath them. Nothing about the enclosure
+is privileged in the shape; it is simply the first subassembly we have built so far.
 
 `assembly_part` carries its own geometry rather than borrowing `cad_component`,
 for the reason the parametric-enclosures RFC already gives: `cad_component`'s
@@ -694,62 +686,81 @@ typed, and the resulting component is reusable across boards.
 
 Requires one props change: `holeProps` and `platedHoleProps` gain
 `children?: any`, which `commonComponentProps` already provides for normal
-components.
+components. Nothing is added to `enclosureFdmBoxProps`: the enclosure hosts no
+bosses of its own.
 
-### 3.3 Two mounts, one element
+### 3.3 One element, two reaches — and never a boss without a hole
 
-The same element serves both fastening jobs, because both are a bored cylinder
-rising from the floor. Its placement context selects which:
+The same element serves both fastening jobs, because both stand on the same boss
+under the same PCB hole. What differs is only how far the screw reaches past it:
 
-| Declared in | Mount | Screw enters | Head bears on |
+| `fastens` | Boss | Screw enters | Head bears on |
 | --- | --- | --- | --- |
-| `<hole>` / `<platedhole>` | PCB mount: boss rises from the floor to the board underside | from above, through the PCB hole | the PCB top surface |
-| `<enclosure.fdm.box>` | lid mount: column rises from the floor to the lid underside | from above, through the lid | the lid outer surface |
+| `board` (default) | floor → board underside | from above, through the PCB hole | the PCB top surface |
+| `lid` | **the same boss** | from above, through the lid, across the headroom, through the same PCB hole | the lid outer surface |
 
 ```tsx
-<enclosure.fdm.box boardRef=".B1">
+<hole name="H3" pcbX={20} pcbY={13} diameter="3.2mm">
   <enclosure.screwboss thread="M3" fastening="heat_set_insert"
-                       head="countersunk" corner="all" />
-</enclosure.fdm.box>
+                       fastens="lid" head="countersunk" />
+</hole>
 ```
 
-`corner="all"` is a declaration of four bosses, not an inference of them; the
-individual corners (`x_neg_y_neg`, …) and explicit enclosure-local `x`/`y` are
-also accepted. Head recesses matter here and only here: the lid is ours to cut.
+**A lid screw costs no floor area**: it reuses a hole the board already has, in
+space the board has already cleared by definition. That is the whole reason for
+preferring it to the obvious alternative — a free-standing column in a corner of
+the enclosure, which an earlier draft of this RFC specified and which was
+removed. A corner column stands tangent to two inside walls and reaches
+diagonally into exactly the space the board wants, so a box sized to hug its
+board has to **grow** to accommodate one: measured, an M3 column took a 46 × 30
+box to 57.7 × 41.7, nearly 12mm on each dimension. A whole XY dimension-inference
+rule existed to pay for that, and deleting the corner column deleted the rule with
+it. The box now never grows for hardware.
+
+The cost of the change is that context no longer selects the mount kind. While a
+boss declared in a hole meant exactly one thing, the *placement* could choose;
+now both kinds are declared in a hole and `fastens` has to say. In exchange,
+there is no boss that is not anchored to a hole, so a boss can never want floor
+area the board has not already cleared.
+
+Head recesses matter on a lid mount and only there: the lid is ours to cut, the
+PCB is not.
 
 | `head` | default `headRecess` | Geometry cut into the lid |
 | --- | --- | --- |
 | `countersunk` | `countersink` | 90° cone to the head's sharp diameter |
-| `socket_cap` | `counterbore` | cylinder, head Ø + fit, head height deep |
-| `pan`, `button` | `none` | clearance hole only |
+| `socket_cap`, `pan`, `button` | `none` | clearance hole only |
 
 `headRecess="none"` with `head="countersunk"` is a design error: a conical head
-on a flat surface neither seats nor clamps.
+on a flat surface neither seats nor clamps. A `counterbore` is legal and is right
+on a thick lid, but it is not a default — see §2.3.2.
 
-### 3.3.1 The box grows to fit its own mounts
+### 3.3.1 The board-to-lid column belongs to the lid
 
-A corner column stands tangent to the two inside walls it sits between, so it
-intrudes diagonally into exactly the space the board wants. In a box sized to hug
-the board -- which is what an unsized `fdm.box` is -- an M3 column of 7.2mm
-overlaps the board every time. The reference implementation answered this by
-bolting external "ears" onto the outside of the box.
+A lid screw crosses the headroom between the board and the lid. Three things can
+fill that gap, and the choice is `lidColumn`:
 
-Growing the box is the simpler answer, and it is the one this package already
-gives in Z, where the depth grows until the lid clears every side-wall aperture.
-Two dimensions therefore acquire a mount-derived minimum, applied under exactly
-the existing rule -- **grow what the author did not state, and hold what they did
-to the same minimum with an actionable error**:
-
-| Dimension | Minimum | Because |
+| | What it is | Consequence |
 | --- | --- | --- |
-| `width`, `height` | board + walls + column radius + a diagonal share of `(radius + clearance)` | the column must clear the board corner |
-| `lidThickness` | recess depth + `minMaterialUnderHeadRecess` | what is left under the recess is what holds the screw down |
+| `printed` (default) | a hollow column moulded into the **lid**, landing on the board | clamps the board as well as the lid; stiffens the lid; costs nothing to buy |
+| `none` | nothing — the screw crosses open air | the lid seats on the walls as it always did, and the board is held by whatever `board` mounts it has |
+| a purchased spacer | a tube between board and lid | **not implemented**: the catalogue admits only specifications a vendor is known to stock, and there is no spacer catalogue yet |
 
-The XY rule is stated per axis, which is stronger than strictly necessary for a
-long thin box, where one axis could have carried more of the diagonal. That is a
-deliberate trade: the exact condition is one equation in two unknowns and names
-no minimum width, so it can reject a box without being able to say what would fix
-it.
+**The column cannot belong to the base**, and this is the constraint that decides
+the whole feature. A column standing up from the floor would occupy the very hole
+the board has to be lowered over, so the board could never be installed. Printing
+it on the lid is what makes a one-screw board-and-lid stack assemblable at all —
+and it makes the lid the first part in this package to be *added to* rather than
+only cut.
+
+Note also what the column does **not** change: the screw. It fills a span the
+screw had to cross either way, so `printed` and `none` resolve to the same length
+and differ only in what is clamped.
+
+The one dimension that still acquires a mount-derived minimum is `lidThickness`,
+under the existing rule — grow what the author did not state, hold what they did
+to the same minimum with an actionable error — because what remains under a head
+recess is what holds the screw down.
 
 ### 3.3.2 Geometry contributions
 
@@ -757,11 +768,11 @@ Every feature contributes an ordered set of operations to named parts, rather
 than being inlined into a shell builder — the pattern the existing aperture
 cutouts already follow:
 
-| Feature | Adds | Subtracts |
-| --- | --- | --- |
-| PCB mount | boss cylinder, floor → board underside | insert bore or self-tap pilot; melt relief |
-| Lid mount | column, floor → lid underside | insert bore or pilot; clearance hole through the lid; head recess in the lid |
-| Both | — | nothing below the minimum floor thickness under a bore |
+| Feature | Part | Adds | Subtracts |
+| --- | --- | --- | --- |
+| every mount | base | boss cylinder, floor → board underside | insert bore or self-tap pilot; melt relief |
+| `fastens="lid"` | lid | the board-to-lid column, when `printed` | one clearance hole for the whole run through lid-side material — plate and column together — plus the head recess |
+| both | — | — | nothing below the minimum floor thickness under a bore |
 
 and each mount contributes hardware occurrences (§1.5) for its screw and, where
 applicable, its insert, positioned so a viewer can draw them and an assembler can
@@ -877,20 +888,24 @@ validity check silently inert:
 | **Access** | from the head seat **outward**, along the access axis | *ordering*. Anything solid that ray crosses must be installed later — that is the tool needing to reach in. |
 | **Path** | from the head seat **inward**, to the end of the shank | *validity*. A part in the way that this fastener does not join, and that is not drilled through there, is not an ordering problem at all: it is a fastener that cannot be installed. |
 
-Run over the worked example — four PCB mounts and four corner lid mounts, the
-same fixture as `core/tests/enclosure/enclosure-screw-boss-3d.test.tsx` — the
-access rule derives:
+Run over the worked example — four mounting holes, two fastening the board and
+two carrying on through the lid, the same fixture as
+`core/tests/enclosure/enclosure-screw-boss-3d.test.tsx` — the access rule
+derives:
 
 ```
-EN1.H1.screw before place:lid          EN1.H3.screw before place:lid
-EN1.H2.screw before place:lid          EN1.H4.screw before place:lid
+EN1.H1.screw before place:lid          EN1.H2.screw before place:lid
 ```
 
 Nobody wrote "the lid goes on after the board is screwed down". It falls out of
-the ray from each board screw's head hitting solid lid. The lid's *own* screws
-are correctly **not** ordered against it, because the ray passes through the
-clearance hole the lid mount cut — a distinction that only appears if the test
-respects the holes rather than a bounding box.
+the ray from each board screw's head hitting solid lid. The screws that fasten
+the *lid* are correctly **not** ordered against it, because their ray passes
+through the clearance hole their own mount cut — a distinction that only appears
+if the test respects the holes rather than a bounding box.
+
+The prototype predates the removal of the corner column, so its measured figures
+below describe a fixture with four board mounts and four free-standing lid
+columns. The derivation is unchanged by that; only the count of operations is.
 
 Topologically sorting that, preferring to keep the same tool in hand, gives:
 
