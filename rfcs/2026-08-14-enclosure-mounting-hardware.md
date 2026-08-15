@@ -28,7 +28,7 @@ without interfering with the board's electrical BOM.
 | Core lowering of hardware geometry into CAD | not started |
 | Boss-versus-component and boss-versus-aperture collision checks | not started |
 | Derived bill of process (Part 5) | designed and prototyped; not built |
-| Fastener procurement engine (McMaster / Fastenal adapters) | proposed |
+| Hardware procurement engine (McMaster / Fastenal adapters) | proposed |
 | Cable, label, thermal-pad and packaging items | out of scope |
 
 ---
@@ -123,18 +123,19 @@ other subcomponents of the device assembly, such as ribbon cables.
 
 Each assembly's BOM goes to the vendor that builds that assembly. That is the
 user-visible distinction we want, and it emerges from the structure rather than
-being asserted by a field.
+being asserted by a field or series of steps.
 
 **Which node owns a part: whatever generates the requirement.** The screws are
-worth stating explicitly, because sequencing puts them somewhere else. Ordered by
-operation, the inserts are pressed into the base before anything else -- an
-enclosure operation -- while the screws are driven only once the board is in the
-box, which is a final-assembly operation, so an process-following MBOM would
-hang the screws off the *device*. We decide that they go under the enclosure: they
+worth stating explicitly, because a process/sequence view of the tree would make
+them children of the assembly rather than enclosure. Ordered by operation, the
+inserts are pressed into the base before anything else -- an enclosure operation --
+while the screws are driven only once the board is in the box, which is a final-
+assembly operation, so an process-following MBOM would hang the screws off the
+*device*. From a declarative perspective, they belong under the enclosure: they
 exist because the enclosure has bosses, they are specified by the enclosure design,
 they are ordered with the rest of the box hardware, and deleting the enclosure
-deletes them. **Structure by what generates the requirement; sequence by the bill
-of process.** Part 5 shows that the sequence is *derivable* from what the solver
+deletes them. **Structure by what generates the requirement; sequence becomes
+emergent.** Part 5 shows that the sequence is *derivable* from what the solver
 already computes, which is what makes this a presentation choice rather than a
 structural commitment: the tree groups by requirement, a derived process says
 when each piece is consumed, and an operation-sequenced MBOM is then a different
@@ -380,15 +381,37 @@ its own decision, which is why the walk returns a tree and flattening is left to
 the caller — a CSV exporter for one vendor wants the subtree elided, and a costed
 roll-up wants it expanded.
 
-Grouping key within a node, in order of preference:
+Grouping key within a node:
 
 ```
-mpn:<manufacturer_part_number>       when a real part is known
-spec:<designation>                   otherwise — deterministic from the spec alone
+spec:<designation>                   the identity — deterministic from the spec alone
+mpn:<manufacturer_part_number>       only when no designation describes the part
 ```
 
-Never a catalogue key. Two catalogues may name the same screw differently, and
-renaming an entry must not silently split or merge a BOM line. Note that grouping
+**The specification is the identity and the part number is not**, which is the
+inverse of the electrical BOM's rule and follows directly from §1.3: any screw
+meeting `ISO 4762 M3x8` will do, so two of them are one line whatever their part
+numbers say. An earlier draft had this backwards, keying on the part number when
+one was known, which contradicted §1.3 two pages earlier.
+
+The decisive argument is stability rather than taste. A part number is *the
+result of a lookup* — against a vendor catalogue, at a moment, possibly over a
+network. Keying on it makes the **shape of the BOM depend on that lookup**: the
+same unchanged design, resolved on a day when one vendor is out of stock, splits
+one line of eight into two of four. That is the same failure this section already
+refuses for catalogue keys, wearing a more official-looking name.
+
+So a part number rides on the line as its preferred source, and `designation`,
+`display_value`, `manufacturer_part_number` and `supplier_part_numbers` are not
+four competing identities on `AssemblyPart`: the designation identifies, the
+display value is what a human reads, and the other two are *sourcing* — the
+resolved answer cached into the artifact so it can be ordered without re-running
+an engine, exactly as `source_component` caches what `partsEngine` resolved.
+
+Where two pieces genuinely must be bought separately — a different material or
+finish — that difference belongs in the **specification**. Its absence there is a
+missing axis (§2.1 notes material and finish are not axes yet), not a reason to
+key a BOM on procurement. Note that grouping
 is **per node**: eight identical screws under one enclosure are one line of
 quantity 8, and the same screw used by a second enclosure is a separate line
 under that enclosure. Rolling those together across the whole device is a
@@ -440,20 +463,55 @@ are. Two layers, mirroring the split tscircuit already uses for electrical parts
 
 | Layer | Contents | Analogue |
 | --- | --- | --- |
-| Built-in catalogue (`create-fdm-enclosure/lib/hardware/`) | curated specifications, each with dimensions and at least one real part number, plus the *available length series* per specification | a footprint library |
-| Fastener engine (platform config) | resolves a specification to current MPN / supplier part numbers / availability | `partsEngine.findPart` |
+| Built-in catalogue (`create-fdm-enclosure/lib/hardware/`) | curated specifications, each with dimensions and at least one real part number, plus the stocked series per specification | a footprint library |
+| Hardware engine (platform config) | resolves a specification to current part numbers, and to the variants a vendor stocks | `partsEngine.findPart` |
 
 ```ts
 // props/lib/platformConfig.ts — beside the existing partsEngine
-fastenerEngine?: {
-  findFastener: (params: { fastener: ResolvedFastenerSpec }) => Promise<{
+
+/** What a mechanical part is, stated the way a vendor's catalogue facets it. */
+interface HardwareSpecification {
+  /** Part family, which is what scopes a catalogue search: "screw", "insert", ... */
+  category: string
+  /** Canonical designation, where a standard gives one. */
+  designation?: string
+  /** The faceted axes and their values: { thread: "M3", head: "socket_cap", length_mm: 8 } */
+  attributes: Record<string, string | number>
+}
+
+hardwareEngine?: {
+  findHardware: (params: { specification: HardwareSpecification }) => Promise<{
     manufacturerPartNumber?: string
     supplierPartNumbers?: SupplierPartNumbers
-    /** Lengths this vendor actually stocks, for length rounding (§2.3). */
-    availableLengthsMm?: number[]
+    /**
+     * Neighbouring specifications this vendor stocks. The caller filters them
+     * for the axis it is solving along -- lengths, when rounding a screw (§2.3).
+     */
+    variants?: HardwareSpecification[]
   }>
 }
 ```
+
+**Why `variants` rather than `availableLengthsMm`.** An earlier draft returned a
+length series, which silently asserts that the axis a part varies along is
+length. That is true of screws and false of nearly everything else a device
+consumes: a washer varies in thickness, inner and outer diameter; a spacer in
+length *and* thread; an o-ring in section and inner diameter. A variant is just
+*another specification the vendor stocks*, and the caller filters it for the axis
+it is solving along, so one engine interface serves every part family instead of
+growing a return field per family.
+
+Returning whole specifications rather than `{ axis, values }` pairs also handles
+axes that are **correlated**: M3 is stocked in different lengths than M4, so a
+list of lengths is only meaningful alongside the thread it belongs to.
+
+**On the loose `attributes` map.** This is the one place the RFC accepts
+stringly-typed data, and it is deliberate: the authoring surface stays typed
+enums (§2.1), and this is the *vendor* boundary, where an adapter deals in facets
+its catalogue defines and we do not. Typed at the authoring edge, faceted at the
+vendor edge. Note that `category` here is not the `part_category` deleted from
+`AssemblyPart` in §1.5: on a stored record it was redundant with the designation,
+whereas a *query* has to scope the search before a designation exists.
 
 Vendor adapters (McMaster-Carr, Fastenal, and others) are then the mechanical
 analogue of the JLCPCB/EasyEDA adapters: they live outside this package, are
@@ -510,8 +568,11 @@ lengths are sorted, so the shortest one that engages is the only candidate that
 could also be short enough, and anything below it is by definition too short. A
 fallback there is unreachable code that reads like a safety net.
 
-The length series is data, from the catalogue entry or the fastener engine —
-never a formula, because "which lengths exist" is a fact about a vendor.
+The length series is data, from the catalogue entry or from the hardware
+engine's `variants` — never a formula, because "which lengths exist" is a fact
+about a vendor. `resolveScrewLength` therefore takes the series as a parameter,
+defaulting to the built-in catalogue, so plugging an engine in later changes a
+call site rather than the rule.
 
 The same reasoning picks the **insert series**: the longest one whose installed
 length fits the bore available, so a shallow stack degrades to a short series
@@ -766,7 +827,7 @@ they are. That is one phase's gap, and it is precisely what Stage 2 closes.
 `getDeviceMbom` to `circuit-json-util`; move enclosure shells off `pcb_component`
 ownership, which also removes the stray `EN1` row measured in §1.1.
 
-**Later.** Vendor adapters for the fastener engine; imperial threads; standoffs,
+**Later.** Vendor adapters for the hardware engine; imperial threads; standoffs,
 spacers and captive nuts; device-level items (labels, thermal pads, packaging)
 as further `assembly_part` categories.
 
