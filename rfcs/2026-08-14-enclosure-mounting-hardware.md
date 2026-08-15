@@ -23,6 +23,8 @@ without interfering with the board's electrical BOM.
 | Lid screws through a PCB hole, with countersink / counterbore recesses | **implemented** |
 | Hardware occurrences in the solver output | **implemented** (`CreateFdmEnclosureOutput.hardware`) |
 | Spacers, stocked or cut from stock, and length-based BOM units | **implemented** |
+| Hardware DSL, and generated geometry for purchased parts | **implemented** |
+| Vendor CAD (McMaster) for non-parametric families | proposed; blocked on a licensing answer, not on format support |
 | Core reads bosses declared on holes and on the enclosure | **implemented** |
 | Durable Circuit JSON records for assembly parts | **proposed only, deliberately not implemented** |
 | `getPcbaBom` / `getEnclosureBom` / `getDeviceMbom` | proposed, blocked on the circuit-json records |
@@ -620,6 +622,83 @@ It follows that a **socket cap head defaults to no recess at all**. A counterbor
 is a legal thing to ask for and is right on a thick part, but an M3 cap head is
 3mm and a printed lid is 2mm, so defaulting to one would cut a recess straight
 through the lid of every box that did not ask for it.
+
+### 2.3.3 Purchased parts get geometry from a DSL, not from a vendor
+
+A spacer, a screw and an insert are all *bought*, so it is tempting to think
+their 3D models must be fetched — from McMaster-Carr, say, which publishes STEP,
+Parasolid, IGES and SAT for its catalogue. Investigated, that is the wrong tool
+for this part of the problem, and the right one is already in the ecosystem.
+
+**What already exists for electronics**, and is worth copying exactly:
+
+| Layer | Package | Job |
+| --- | --- | --- |
+| DSL | `footprinter` | `"soic8_w5.3mm"` → a 2D footprint |
+| Models | `jscad-electronics` | the same string → a parametric 3D model |
+| Render | `circuit-json-to-gltf` | reads `cad_component.footprinter_string` and expands it |
+
+A component's 3D model is *generated from an eight-character string*, not
+shipped. `hardware-dsl.ts` and `get-hardware-model.ts` are the mechanical twin,
+and deliberately reuse footprinter's grammar — segments joined by `_`, each a
+name with an optional numeric value — so one grammar covers both vocabularies:
+
+```
+screw_m3_l8_socketcap        insert_m3_l5.7_heatset        spacer_od6_id3.2_l6.3
+```
+
+**Why generate rather than fetch, for these parts specifically.** A fastener's
+shape is *entirely implied by its specification* — that is the premise of §2.1 —
+so a vendor model adds a thread helix and exact fillets and nothing else. Against
+that it costs a network round trip, a B-rep tessellation, a licence question, and
+a runtime dependency on a vendor being reachable. It is also a **downgrade in
+robustness** by this RFC's own argument for enclosure parts: a generated plan
+survives the worker boundary, cached builds, a saved `circuit.json` and static
+rendering, where a URL does not.
+
+There is a second argument that is easy to miss. Part 5's access and path rules
+sweep volumes, and the boss and aperture checks need clean solids; a tessellated
+vendor mesh is *worse* input for both than the parametric plan. So even with
+vendor CAD in hand, the rule would be **spec-derived geometry for reasoning,
+vendor model for display** — which leaves the vendor model doing very little.
+
+**Where vendor CAD does earn its keep** is the shapes a specification does not
+imply: switches, cable glands, latches, hinges, fans, feet, DIN-rail clips. Those
+are a later part family, and the plumbing for them is further along than
+expected — `circuit-json-to-gltf` already tessellates STEP through
+`occt-import-js` in both browser and Node, already accepts auth headers, and
+`cad_component.model_step_url` is already read. What is missing there is not
+format support but **a licensing answer**: the EasyEDA integration *mirrors*
+vendor models onto `modelcdn.tscircuit.com`, and whether McMaster's terms permit
+the same is a question for a human, not an implementation detail.
+
+**The string carries three jobs at once**, which is why it is a string and not
+just a typed spec:
+
+| Job | Why the string |
+| --- | --- |
+| identity | canonical and total, so equal strings are the same part |
+| geometry | `getHardwareModel(s)` returns a solid, so nothing has to ship a mesh |
+| storage | ~20 bytes against ~250 for its own plan and kilobytes for a mesh, and it stays readable and diffable in a saved build |
+
+Two details worth recording because both are load-bearing:
+
+- **Dimensions are rounded when formatted into a string.** A gap derived as
+  `totalHeight - lidThickness - boardTopZ` arrives as 7.500000000000002, and an
+  identity that carries that noise makes two spacers of the same real length into
+  different parts. Rounded to a micron, which is finer than the domain specifies
+  and far coarser than the noise.
+- **A cut spacer's geometry string and its BOM designation deliberately differ.**
+  The model must know the length it was cut to; the BOM identity must *omit* it so
+  every cut draws from one line of stock (§3.3.2).
+
+**Open question.** The hardware string and the `designation` are both canonical
+total identities of the same part, which is one identity too many. The string is
+the better *key* — it is parseable and extends along new axes (`_a2` for
+material) where "ISO 4762 M3x8" has no slot for one — while the designation is
+the better *label*. Folding them, with the standard reference kept as display
+metadata, is proposed but not done: it changes every BOM group key and deserves
+its own decision.
 
 ### 2.4 What stays generic, what is FDM-specific
 
