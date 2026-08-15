@@ -486,15 +486,34 @@ length fits the bore available, so a shallow stack degrades to a short series
 rather than failing. The default 4mm standoff over a 2mm floor leaves 5.2mm of
 bore, which does not take a 5.7mm M3 insert.
 
-### 2.3.1 Two clearance series, because two different people drill the hole
+### 2.3.1 Clearance holes, and the bore they are not
 
-ISO 273 gives a fine and a medium series, and which one applies depends on who
-owns the hole:
+A screw passes **through** three things and threads **into** a fourth. The three
+passages take a clearance diameter; the fourth is sized by the fastening method
+and is not a clearance at all.
 
-| Hole | Series | Why |
+| Passage the screw goes through | Diameter | Because |
 | --- | --- | --- |
-| the PCB's mounting hole | **fine** (3.2mm for M3) | we do not drill it, and 3.2mm for an M3 is what practically every layout uses. Requiring the medium 3.4mm would reject almost every real board while the screw passes through perfectly well. |
-| the lid's clearance hole | **medium** (3.4mm for M3) | we do drill it, and a printed part wants assembly slop |
+| the lid's clearance hole | ISO 273 **medium** (3.4mm for M3) | we generate it, and a printed part wants assembly slop |
+| the PCB's mounting hole | validated against ISO 273 **fine** (3.2mm for M3) | the board fab made it to the layout's number, and 3.2mm for an M3 is what practically every layout uses; demanding 3.4mm would reject almost every real board while the screw passes through perfectly well |
+| a bought spacer's bore | validated against ISO 273 **fine** | a spacer is deliberately a close fit, so it stays concentric with the screw |
+
+The rule is not about who made the hole; it is about **whether the dimension is
+ours to choose**. We size what we generate at the medium series, and validate what
+we inherit against the fine one.
+
+**The boss bore is none of these**, and it is worth stating because it is the
+feature people picture first. It is the recess the screw threads into, sized from
+the fastening method rather than from a clearance series:
+
+| Fastening | Bore | Source |
+| --- | --- | --- |
+| `self_tapping` | pilot, 2.5mm for M3 | `ThreadSpec.selfTapPilotMm` |
+| `heat_set_insert` / `press_fit_insert` | the insert's installation diameter, 4.0mm for M3 | `InsertSpec.installHoleDiameterMm` |
+
+A clearance hole is sized so the screw does **not** touch it. A bore is sized so
+it does -- that interference is the joint. They are opposite requirements, which
+is why they come from different tables.
 
 ### 2.3.2 A head recess is two different depths
 
@@ -864,7 +883,7 @@ silently inert:
 | Rule | Sweep | Produces |
 | --- | --- | --- |
 | **Access** | from the head seat **outward**, along the access axis | *ordering*. Anything solid that ray crosses must be installed later — that is the tool needing to reach in. |
-| **Path** | from the head seat **inward**, to the end of the shank | *validity*. A part in the way that this fastener does not join, and that is not drilled through there, is not an ordering problem at all: it is a fastener that cannot be installed. |
+| **Path** | from the head seat **inward**, to the end of the shank | *validity*. A part in the way that this fastener does not join, and that has no clearance hole there, is not an ordering problem at all: it is a fastener that cannot be installed. |
 
 Run over the worked example — four mounting holes, two fastening the board and
 two carrying on through the lid, the same fixture as
