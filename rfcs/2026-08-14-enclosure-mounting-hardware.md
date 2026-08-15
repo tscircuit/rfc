@@ -291,6 +291,41 @@ assembly_component "controller"                       (no parent — the device)
 `-- assembly_component "ribbon cable"                 (device-level, not enclosure)
 ```
 
+#### 1.5.3 The invariants, and where they are enforced
+
+The schema validates a record; it cannot validate a document. Nothing in zod
+stops an `assembly_component` tree from having two roots, a cycle, a screw as a
+parent of an enclosure, geometry on a subassembly, or the same `pcb_board_id`
+claimed twice. That is not a flaw peculiar to this record --
+`source_group.parent_source_group_id` has exactly the same exposure today, and
+`inflate-circuit-json.ts` carries its own cycle detection precisely because
+nothing upstream guarantees acyclicity.
+
+So the invariants are stated here as rules, and enforced where tscircuit already
+enforces document-level rules: **`@tscircuit/checks`**. Its checks are pure
+functions over `AnyCircuitElement[]` that return typed Circuit JSON error and
+warning records, and core runs them from a render phase and inserts what they
+return (`runAllPlacementChecks`, called from `Board_doInitialPcbPlacementDesignRuleChecks`).
+A `checkAssemblyComponentTree` fits that shape exactly and needs no new
+machinery, only a new error record to report with.
+
+| Invariant | Why it matters |
+| --- | --- |
+| every `parent_assembly_component_id` resolves | a dangling parent silently drops a subtree from every BOM |
+| the graph is acyclic | `getDeviceMbom` is a walk; a cycle is a hang, not a wrong answer |
+| a component with children carries no geometry | otherwise a renderer draws the enclosure twice (§1.5.2) |
+| a `pcb_board_id` appears at most once | a board is one line item; twice means two BOMs claim it |
+| components sharing a designation within a node agree on `unit` | the grouping fold sums quantity, and summing `each` with `mm` is meaningless |
+
+Two of these are worth stating as *warnings* rather than errors, because a
+document can be useful without them: more than one root is simply more than one
+device, and an unreferenced component is orphaned rather than invalid.
+
+Note what this does not claim: no such check exists today, for this record or for
+`source_group`. Writing one is Stage 2 work, and the point of listing the
+invariants now is that the record was designed to make them checkable -- a single
+node type with one parent pointer is a graph you can validate in one pass.
+
 ### 1.6 Three BOM queries, one walk
 
 With those records a BOM view is a **subtree**, not a filtered list. Proposed for
@@ -852,8 +887,9 @@ component, and Stage 2 would delete them. The cost of waiting is that a saved
 cost of not waiting is tripling the number of records built on a claim we intend
 to withdraw.
 
-**Stage 2 — after the record is reviewed.** Land `assembly_component`; add
-`getPcbaBom`, `getEnclosureBom` and `getDeviceMbom` to `circuit-json-util`; and
+**Stage 2 — after the record is reviewed.** Land `assembly_component` and a
+`checkAssemblyComponentTree` in `@tscircuit/checks` (§1.5.3); add `getPcbaBom`,
+`getEnclosureBom` and `getDeviceMbom` to `circuit-json-util`; and
 emit enclosure parts and hardware as `assembly_component`s rather than as
 `cad_component`s with a synthetic PCB owner, which also removes the stray `EN1`
 row measured in §1.1.
