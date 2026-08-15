@@ -22,6 +22,7 @@ without interfering with the board's electrical BOM.
 | PCB mounting bosses (heat-set / press-fit / self-tapping) | **implemented** |
 | Lid screws through a PCB hole, with countersink / counterbore recesses | **implemented** |
 | Hardware occurrences in the solver output | **implemented** (`CreateFdmEnclosureOutput.hardware`) |
+| Spacers, stocked or cut from stock, and length-based BOM units | **implemented** |
 | Core reads bosses declared on holes and on the enclosure | **implemented** |
 | Durable Circuit JSON records for assembly parts | **proposed only, deliberately not implemented** |
 | `getPcbaBom` / `getEnclosureBom` / `getDeviceMbom` | proposed, blocked on the circuit-json records |
