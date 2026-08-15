@@ -26,7 +26,7 @@ without interfering with the board's electrical BOM.
 | Hardware DSL like footprinter, and generated geometry for purchased parts | **implemented** |
 | Vendor CAD (McMaster) for non-parametric families | proposed; blocked on a licensing answer, not on format support |
 | Core reads bosses declared on holes and on the enclosure | **implemented** |
-| Durable Circuit JSON records for assembly parts (three, all structural) | **proposed only, deliberately not implemented** |
+| A durable Circuit JSON record for assembly parts (one, self-nesting) | **proposed only, deliberately not implemented** |
 | Records for authored aperture/boss intent | **argued against and not needed** (§1.5.3); the isolation hazard is handled in core instead |
 | `getPcbaBom` / `getEnclosureBom` / `getDeviceMbom` | proposed, blocked on the circuit-json records |
 | Core lowering of hardware geometry into CAD | not started |
@@ -172,150 +172,150 @@ The PCBA BOM is then correct by construction: `circuit-json-to-bom-csv` needs no
 change and cannot accidentally include hardware, and no future consumer has to
 remember to filter. This is opt-**in** where a category flag would be opt-**out**.
 
-### 1.5 Proposed Circuit JSON records — generic, deliberately not implemented
+### 1.5 One proposed Circuit JSON record, deliberately not implemented
 
-These records are **proposed, not committed**. The implementation described in
-Part 3 proceeds without them: hardware currently lives in the solver output only,
-and no `circuit-json` change is made until the set below has been adopted.
+This record is **proposed, not committed**. The implementation in Part 3 proceeds
+without it: hardware lives in the solver output only, and no `circuit-json`
+change is made until it has been reviewed on its own merits.
 
-First, `cad_fdm_enclosure` was originally proposed as the circuit-json element
-to store the metadata about the FDM enclosure; however, that would encode a
-process taxonomy into the interchange format that the authoring namespace should
-not need to commit to. So the process should be a **field**, not a record type:
+An earlier draft of this section proposed *three* records —
+`source_assembly_device`, `source_enclosure` and `assembly_part`. Two of them were
+scaffolding for a tree, and the tree does not need them.
+
+#### 1.5.1 How hierarchy already works, and why it is the wrong tree to reuse
+
+Measured, not assumed. Rendering a board containing a subcircuit gives:
+
+```
+source_group_1  name "b"    is_subcircuit          <- the board
+source_group_0  name "sub"  parent source_group_1  <- nested subcircuit
+source_component R1  source_group_id source_group_0
+pcb_board  ->  source_board.source_group_id  ->  the group tree
+```
+
+So Circuit JSON *does* have a hierarchy: `source_group` with
+`parent_source_group_id`, with `source_component.source_group_id` placing parts
+in it, and a board joined to it through `source_board`.
+
+It is tempting to hang the enclosure off that, and it would be wrong, because
+**it is a different decomposition**. The `source_group` tree is *functional*: it
+nests subcircuits, carries `subcircuit_id`, and decides schematic boxes. The
+assembly tree is *physical*: it nests what is screwed into what. A board with
+five nested subcircuits is five nodes in the functional tree and **one line item**
+in the physical one; an enclosure is a node in the physical tree and has no
+position in the functional one at all. Reusing `source_group` would fuse two
+trees that legitimately disagree about their own shape.
+
+#### 1.5.2 The record
+
+A physical assembly tree is a tree of *items*, and a subassembly is an item that
+has children. So the record nests into itself, and that one change removes the
+other two:
 
 ```ts
-/** Product-level root. One per assembly.device. */
-interface SourceAssemblyDevice {
-  type: "source_assembly_device"
-  source_assembly_device_id: string
-  name: string
-}
-
-/** One authored enclosure request. Process is a field, not a record type. */
-interface SourceEnclosure {
-  type: "source_enclosure"
-  source_enclosure_id: string
-  /** Membership: this enclosure is a subassembly of that device. */
-  source_assembly_device_id: string
-  name: string
-  /** How it is produced. Extensible; not a closed taxonomy. */
-  manufacturing_process: "fdm" | string
-  /** How it comes apart. Extensible. */
-  construction: "box" | string
-  /**
-   * Geometry reference: the board(s) this enclosure is built around.
-   *
-   * Deliberately NOT the membership edge, which is why it can become a list for
-   * a multi-board enclosure without disturbing the assembly tree. A board is a
-   * subassembly of the *device*, not of the enclosure — the enclosure is built
-   * and shipped without a board in it.
-   * Enclosures can mount multiple PCBs in the future because each PCB can have
-   * mounting holes and cutout apertures specified for that board's components,
-   * although we only use a single boardRef per enclosure today.
-   */
-  pcb_board_ids: string[]
-}
-
 /**
- * One physical member item consumed by an assembly: a printed shell, a screw,
- * an insert, a spacer, a washer, a label, a ribbon cable.
+ * One physical member item of a device: a printed shell, a screw, a spacer, a
+ * ribbon cable — or a subassembly holding more of them.
  *
- * One record per physical piece — quantity is grouping, exactly as the PCBA BOM
- * derives quantity from occurrences today.
+ * One record per physical piece. Quantity is grouping, exactly as the PCBA BOM
+ * derives quantity from placed components today.
  */
 interface AssemblyPart {
   type: "assembly_part"
   assembly_part_id: string
 
   /**
-   * The assembly that consumes it. Exactly one, and the only edge that decides
-   * which BOM the part appears in.
-   *
-   * Discriminated rather than a bare id because expanding a node is
-   * polymorphic — a board expands to its `pcb_component`s, an enclosure to its
-   * `assembly_part`s — so a generic walk has to know what kind of node it is
-   * standing on. A third kind (a cable harness, a daughterboard module with its
-   * own sub-parts) is then a new enum value, not a new field.
+   * The assembly that consumes it. Absent on the root, and the root is
+   * therefore the device: a named part with no parent, which is all
+   * `source_assembly_device` ever was.
    */
-  parent_assembly_type: "assembly_device" | "enclosure"
-  parent_assembly_id: string
+  parent_assembly_part_id?: string
 
-  name: string                       // "EN1.base", "EN1.H1.screw"
+  name: string                       // "controller", "EN1", "EN1.base", "EN1.H1.screw"
+
+  /**
+   * Set when this line *is* a board, which is how the PCBA appears as a single
+   * item whose own BOM is the existing electrical one. It also supplies the
+   * device-to-board edge without adding a field to `pcb_board`.
+   */
+  pcb_board_id?: string
 
   /** Specification identity. Groups BOM lines when no MPN exists. */
-  designation?: string               // "ISO 4762 M3x0.5x8 A2-70"
-  display_value?: string             // "M3 x 8mm socket head cap screw, A2 stainless"
+  designation?: string
+  display_value?: string
   manufacturer_part_number?: string
   supplier_part_numbers?: Partial<Record<SupplierName, string[]>>
 
-  /**
-   * The element who carries the declaration requiring this part
-   * See §1.5.2.
-   */
+  /** See §3.3.2: `each` for discrete pieces, `mm` for stock consumed by length. */
+  quantity: number
+  unit: "each" | "mm"
+
+  /** How a *fabricated* part is made. A property of the part, not of the assembly. */
+  manufacturing_process?: "fdm" | string
+
+  /** The element whose existence requires this part (§1.5.4). */
   generated_by?: CircuitJsonElementRef
 
-  /** Placement in the device frame, and the geometry to draw. */
-  position: Point3
+  /** Leaves only — see below. */
+  position?: Point3
   rotation?: Point3
+  hardware_string?: string           // "screw_m3_l8mm_socketcap", see §2.3.3
   model_jscad?: unknown
-  model_stl_url?: string
   model_step_url?: string
-  model_unit_to_mm_scale_factor?: number
 }
 ```
 
-### 1.5.1 Two kinds of edge, and only one new record
+**`source_assembly_device` is gone.** It existed to be the root of a tree; the
+root of a tree of parts is the part with no parent. It has a name, which is the
+only thing the device record carried.
 
-An assembly tree has two kinds of edge, and they are not expressed the same way:
+**`source_enclosure` is gone**, and its one substantive field is better placed
+anyway. An enclosure is a subassembly — an `assembly_part` with children — and
+`manufacturing_process` belongs on **the part being made**, not on the assembly
+containing it: the base and lid are FDM, and a metal bracket added to the same
+enclosure tomorrow is not. Putting the process on the enclosure would have forced
+every part inside it to share one.
 
-| Edge | Meaning | Expressed as |
-| --- | --- | --- |
-| assembly contains **subassembly** | the device contains this enclosure, and this board | a parent pointer on the *node* record: `source_enclosure.source_assembly_device_id`, plus a new `pcb_board.source_assembly_device_id` |
-| assembly consumes **item** | this enclosure consumes 8 screws | one `assembly_part` per piece, carrying its parent |
+**A subassembly carries no geometry.** It is tempting, since we already produce
+an assembled plan, but a renderer given both a subassembly's mesh and its
+children's would draw the enclosure twice, and the two would drift the moment a
+child changed. Geometry lives on leaves; an assembled preview is a union of them,
+computed by whoever wants it.
 
-So the structure costs one new relationship on an existing record — `pcb_board`
-gains an optional device pointer, since nothing links a board to the device that
-contains it today — and the parent on `assembly_part`. The PCBA line in the
-device MBOM is then *derived* from the board node being under the device, rather
-than being a second record that could drift out of agreement with the board it
-names.
+**The parent no longer needs a type discriminator.** An earlier draft carried
+`parent_assembly_type: "assembly_device" | "enclosure"` because expanding a node
+was polymorphic. With one node type it is not: a part's children are
+`assembly_part`s, and the single special case — a line that is a board, whose
+sub-BOM is its `pcb_component`s — is signalled by `pcb_board_id` being present.
 
-This is also the answer to daughterboards, ribbon cables, and anything else that
-belongs to the device but not to the enclosure: they are `assembly_part`s whose
-parent is the **device**, or — when they have internal structure that requires
-expansion, a further node kind with parts beneath them. Nothing about the enclosure
-is privileged in the shape; it is simply the first subassembly we have built so far.
+So the whole device is one record type:
 
-`assembly_part` carries its own geometry rather than borrowing `cad_component`,
-for the reason the parametric-enclosures RFC already gives: `cad_component`'s
-asset-normalization fields (`model_origin_alignment`,
-`model_board_normal_direction`, `model_object_fit`, `anchor_alignment`) describe
-how to fit *a supplied part file to a footprint*. A generated plan is already
-authored in device coordinates, so `position` alone places it, and none of those
-fields have a meaning to give. The alternative — relaxing
-`cad_component.pcb_component_id` to optional — is a wider change that turns a
-`string` into `string | undefined` for every existing consumer, and it would
-still leave the footprint-fitting fields meaningless on these records.
+```
+assembly_part "controller"                       (no parent — the device)
+|-- assembly_part "B1"        pcb_board_id set   (its BOM is the electrical one)
+|-- assembly_part "EN1"                          (a subassembly, no geometry)
+|   |-- assembly_part "EN1.base"   manufacturing_process "fdm", model_jscad
+|   |-- assembly_part "EN1.lid"    manufacturing_process "fdm", model_jscad
+|   |-- assembly_part "EN1.H1.insert"  hardware_string "insert_m3_l3mm_heatset"
+|   `-- assembly_part "EN1.H1.screw"   hardware_string "screw_m3_l14mm_countersunk"
+`-- assembly_part "ribbon cable"                 (device-level, not enclosure)
+```
 
-### 1.5.3 There is no record for the authored intent, and there should not be
+#### 1.5.3 There is no record for the authored intent, because it is unnecessary
 
 No `source_enclosure_mount`, and — the same argument — an open question over
 whether `source_cutout_aperture` earns its place either.
 
-The reason is a principle worth stating outright, because it decides several
+The principle stated outright, because it decides several
 later cases too: **Circuit JSON represents the artifact, not the source that
 produced it.** It is tempting to read the existing `source_*` records as
 "the design intent, persisted", but that is not why they exist. `source_component`
 and `source_trace` are there because the *netlist* is a semantic model that the
 schematic view, the PCB view, simulation, DRC and the BOM all read
 independently — not so that the TSX can be reconstructed. A record earns its
-place by having consumers, not by having been authored.
-
-Measured against this RFC's own criteria (§1.5), an aperture fails the fifth
-outright: it is *an input to the enclosure solver, consumed during render*, in
-exactly the way `wallThickness` and `standoffHeight` are. Nobody proposes
-persisting `wallThickness` as a record, and an aperture is the same kind of
-thing wearing a more object-like shape.
+place by requiring consumers - since the create-fdm-enclosure module fully
+authors the cad models, the source_cutout_aperture and source_enclosure_mount
+records do not need to be represented in circuit-json.
 
 A screw boss fails for a second and independent reason: **`generated_by` already
 carries everything a mount record would.** A mount is not a thing anyone makes or
@@ -324,13 +324,14 @@ The things it *does* produce (a screw, an insert, a spacer) are parts, already
 have records, and each already points at the `pcb_hole` that caused it. A
 `source_enclosure_mount` would restate an association the parts already carry.
 
-**What is given up, stated plainly.** With no aperture record, nothing downstream
+Tradeoff: With no aperture record, nothing downstream
 can ask "which component is this opening for?" — the opening is anonymous
 geometry inside the shell's CSG tree. A checker running over a *saved*
 `circuit.json` therefore cannot verify a rule like "every connector that declares
-an aperture got an unobstructed one"; that check has to run during the render,
-where the resolved apertures still exist. Both are acceptable today, and neither
-is recovered by a record that no shipped consumer reads.
+an aperture got an unobstructed one"; that check has to run during the enclosure render,
+where the resolved apertures still exist. This will constrain us to run assembly DRC
+during the enclosure rendering; if this becomes ornerous, we can add the circuit-json
+records.
 
 The proposal is therefore **three records, all structural** —
 `source_assembly_device`, `source_enclosure`, `assembly_part` — each justified by
@@ -408,6 +409,8 @@ enclosure problems:
   that changes its output by 3.9x is not yet an optimization one should reach
   for, which further lowers the price of declining it.
 
+#### 1.5.4 Provenance is a reference to *any* element, not to a hole
+
 ### 1.6 Three BOM queries, one walk
 
 With those records a BOM view is a **subtree**, not a filtered list. Proposed for
@@ -416,13 +419,14 @@ With those records a BOM view is a **subtree**, not a filtered list. Proposed fo
 | Function | Node it is rooted at | Emits | Goes to |
 | --- | --- | --- | --- |
 | `getPcbaBom(circuitJson, { boardName? })` | a `pcb_board` | its `pcb_component`s — exactly what `circuit-json-to-bom-csv` produces today | the board assembler |
-| `getEnclosureBom(circuitJson, { enclosureName? })` | a `source_enclosure` | its fabricated shells and the hardware consumed to mount and close it | the print farm and the fastener supplier |
-| `getDeviceMbom(circuitJson)` | the `source_assembly_device` | each child node as **one line**, expandable to that node's own BOM, plus the device-level parts | final assembly |
+| `getEnclosureBom(circuitJson, { enclosureName? })` | the enclosure's `assembly_part` | its subtree: fabricated shells, and the hardware consumed to mount and close it | the print farm and the fastener supplier |
+| `getDeviceMbom(circuitJson)` | the root `assembly_part` | each child as **one line**, expandable to its own subtree, plus the device-level parts | final assembly |
 
-The three are one recursive walk with a per-node-kind expansion, not three
-bespoke queries — which is the practical reason §1.5's parent reference carries
-the node kind. `getEnclosureBom` is `getDeviceMbom` rooted lower; adding a fourth
-node kind adds an expansion, not a function.
+The three are one recursive walk over one record type, not three bespoke queries.
+`getEnclosureBom` is `getDeviceMbom` rooted lower, and it needs no argument about
+what kind of node it landed on: children are always `assembly_part`s, and the one
+special case — a line that *is* a board, whose sub-BOM is the existing electrical
+one — is signalled by `pcb_board_id`.
 
 `getDeviceMbom` emitting the PCBA as a single line is what makes it a real
 product MBOM: the final-assembly vendor needs the board as one item they receive,
