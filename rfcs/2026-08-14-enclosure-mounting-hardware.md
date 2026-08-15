@@ -22,7 +22,7 @@ without interfering with the board's electrical BOM.
 | PCB mounting bosses (heat-set / press-fit / self-tapping) | **implemented** |
 | Lid screws through a PCB hole, with countersink / counterbore recesses | **implemented** |
 | Hardware occurrences in the solver output | **implemented** (`CreateFdmEnclosureOutput.hardware`) |
-| Spacers, stocked or cut from stock, and length-based BOM units | **implemented** |
+| Spacers, stocked or cut to length from stock | **implemented** |
 | Hardware DSL like footprinter, and generated geometry for purchased parts | **implemented** |
 | Vendor CAD (McMaster) for non-parametric families | proposed; blocked on a licensing answer, not on format support |
 | Core reads bosses declared on holes | **implemented** |
@@ -230,10 +230,6 @@ interface AssemblyComponent {
    */
   supplier_part_numbers?: Partial<Record<SupplierName, string[]>>
 
-  /** See §3.3.2: `each` for discrete pieces, `mm` for stock consumed by length. */
-  quantity: number
-  unit: "each" | "mm"
-
   /** How a *fabricated* part is made. A property of the part, not of the assembly. */
   manufacturing_process?: "fdm" | string
 
@@ -315,7 +311,6 @@ machinery, only a new error record to report with.
 | the graph is acyclic | `getDeviceMbom` is a walk; a cycle is a hang, not a wrong answer |
 | a component with children carries no geometry | otherwise a renderer draws the enclosure twice (§1.5.2) |
 | a `pcb_board_id` appears at most once | a board is one line item; twice means two BOMs claim it |
-| components sharing a designation within a node agree on `unit` | the grouping fold sums quantity, and summing `each` with `mm` is meaningless |
 
 Two of these are worth stating as *warnings* rather than errors, because a
 document can be useful without them: more than one root is simply more than one
@@ -779,35 +774,35 @@ A spacer has to be exactly as long as the gap it fills, and that gap is exactly
 length and cut during assembly**, so the enclosure never rounds its geometry to a
 vendor's inventory. Resolution takes the better of the two:
 
-| | When | Unit |
+| | When | Designation |
 | --- | --- | --- |
-| a stocked piece | the gap equals a stocked length — the default 6mm headroom is one | `each`, quantity 1 |
-| cut from stock | any other gap | `mm`, quantity = the cut length |
+| a stocked piece | the gap equals a stocked length -- the default 6mm headroom is one | `spacer nylon 6mm x 3.2mm x 6mm` |
+| cut from stock | any other gap | `spacer-stock nylon 6mm x 3.2mm cut 7.5mm` |
 
 A stocked piece is preferred where one fits, because cutting is a hand operation
 with a hand operation's tolerance: a sawn nylon tube is good to a few tenths and
 that error lands directly in the clamp.
 
-**This is the first BOM item not counted in pieces.** `HardwareOccurrence` gains
-`quantity` and `unit`, every existing item being `{ quantity: 1, unit: "each" }`,
-and grouping *sums quantity* rather than counting occurrences — one rule yielding
-a count for discrete parts and a length for stock.
+**A cut spacer is still counted in pieces.** Its designation names the stock *and*
+the length it is cut to, so pieces of one length group into one line with a
+count: sixteen 8.2mm pieces and twelve 9.1mm pieces are two lines. How many 300mm
+rods that takes, and what kerf and trim it costs, is the assembler's arithmetic --
+in the same way a BOM asking for eight screws does not ask for nine in case one
+is dropped.
 
-What is bought when a spacer is cut is the **stock**, not the piece, so its
-designation omits the length:
+An earlier version made the cut length a *quantity of stock* instead, so four
+7.5mm pieces became one line of 30mm. That required `quantity` and `unit` fields
+on every occurrence to distinguish a count from a length, and gave the assembler
+a number they would have to divide back into pieces. Counting pieces needs
+neither field, so neither exists: one record per physical piece, and a line's
+quantity is the count of records sharing a designation.
 
-```
-spec:spacer nylon 6x3.2x6         a stocked 6mm piece
-spec:spacer-stock nylon 6x3.2     stock, whatever it was cut to
-```
-
-Four mounts needing 7.5mm each are therefore **one line of 30mm of stock**, not
-four line items naming a part number nobody sells. That is the length the design
-consumes; kerf, trim and how many 300mm rods to order are the assembler's, in the
-same way that a BOM asking for eight screws does not ask for nine in case one is
-dropped. The cut list is not lost by
-that fold: it is the occurrences, which a consumer already holds. Cut stock
-overage estimation is recommended but left to be implemented later.
+One detail worth recording. A spacer is the only fastener whose length is
+*derived* rather than looked up -- it is the board-to-lid gap -- so it arrives
+carrying floating-point noise, and `7.500000000000002` in a designation would
+split one BOM line into two. Designations format lengths through `formatMm` for
+that reason, the same helper and the same reason as the hardware strings in
+§2.3.3.
 
 ### 3.3.3 Geometry contributions
 
