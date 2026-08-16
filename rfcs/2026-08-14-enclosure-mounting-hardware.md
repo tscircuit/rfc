@@ -34,7 +34,8 @@ without interfering with the board's electrical BOM.
 | Derived bill of process (Part 5) | designed and prototyped; not built |
 | Hardware procurement engine (McMaster / Fastenal adapters) | proposed |
 | Cable, label, thermal-pad and packaging items | out of scope |
-| 3D rotation semantics; subcircuit caching fidelity | spun out into their own RFCs, both found here |
+| 3D rotation semantics | spun out into its own RFC, found here |
+| Subcircuit caching fidelity | not pursued; caching is off by default and known-broken, and the maintainers are prioritizing it themselves. Apertures and bosses are dropped by it, like anything else with no inflator; turning `_subcircuitCachingEnabled` on is at your own risk |
 
 ---
 
