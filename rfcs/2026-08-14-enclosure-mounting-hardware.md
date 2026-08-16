@@ -30,7 +30,8 @@ without interfering with the board's electrical BOM.
 | Records for authored aperture/boss intent | not proposed; apertures and bosses are solver inputs, consumed during the render |
 | `getPcbaBom` / `getEnclosureBom` / `getDeviceMbom` | proposed, blocked on the circuit-json records |
 | Core lowering of hardware geometry | deferred to Stage 2, with `assembly_component` |
-| Boss-versus-component and boss-versus-aperture collision checks | not started |
+| Boss-versus-aperture collision reporting | **implemented** |
+| Boss-versus-component collision checks | not started |
 | Derived bill of process (Part 5) | designed and prototyped; not built |
 | Hardware procurement engine (McMaster / Fastenal adapters) | proposed |
 | Cable, label, thermal-pad and packaging items | out of scope |
@@ -856,9 +857,21 @@ property of composition means no future feature builder has to remember it.
 
 Apertures are subtracted after the bosses are fused, so an opening that overlaps
 a boss removes the material in its way rather than being covered by it. That is
-the right outcome -- the part has to fit -- but it silently weakens the boss, and
-a boss/aperture collision check belongs with the other placement rules once they
-exist.
+the right outcome -- the part has to fit -- but it silently weakens the boss, so
+the solver reports it: `collisions` on the output names the mount, which of its
+two columns was cut, the aperture and how deep the cut reaches.
+
+It is a warning rather than an error because the geometry is still buildable. It
+measures against the aperture solver's **own** tool depths rather than a second
+derivation of them, so it can only ever describe the volume that is actually
+subtracted, and it tests the boss circle against the opening rather than their
+bounding boxes, so a boss that merely shares a corner is not reported.
+
+Worth knowing what it does *not* fire on: a floor boss spans the inside floor to
+the underside of the board, while a side-wall opening is placed against the body
+of the part it serves, which is above the board. Sitting on top of each other in
+plan, they never share a Z band. The case that does collide is a **lid column**,
+which occupies exactly the band a side connector does.
 
 ### 3.4 Design rules
 
