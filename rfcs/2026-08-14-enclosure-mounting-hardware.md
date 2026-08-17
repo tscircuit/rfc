@@ -30,8 +30,8 @@ without interfering with the board's electrical BOM.
 | Records for authored aperture/boss intent | not proposed; apertures and bosses are solver inputs, consumed during the render |
 | `getPcbaBom` / `getEnclosureBom` / `getDeviceMbom` | proposed, blocked on the circuit-json records |
 | Core lowering of hardware geometry | deferred to Stage 2, with `assembly_component` |
-| Boss-versus-aperture collision reporting | **implemented** |
-| Boss-versus-component collision checks | not started |
+| FDM design rule checks (wall thickness, insert encirclement, bridging) | **implemented** |
+| Overhang checking, and boss-versus-component | not started |
 | Derived bill of process (Part 5) | designed and prototyped; not built |
 | Hardware procurement engine (McMaster / Fastenal adapters) | proposed |
 | Cable, label, thermal-pad and packaging items | out of scope |
@@ -861,11 +861,17 @@ the right outcome -- the part has to fit -- but it silently weakens the boss, so
 the solver reports it: `collisions` on the output names the mount, which of its
 two columns was cut, the aperture and how deep the cut reaches.
 
-It is a warning rather than an error because the geometry is still buildable. It
-measures against the aperture solver's **own** tool depths rather than a second
-derivation of them, so it can only ever describe the volume that is actually
-subtracted, and it tests the boss circle against the opening rather than their
-bounding boxes, so a boss that merely shares a corner is not reported.
+This is one of the **FDM design rule checks** (§3.5), and its limit is not a new
+number: a boss is sized as `bore + 2 * minInsertWallMm`, so the check applies the
+identical rule to the boss as built rather than as designed. A boss deliberately
+made oversized may therefore lose material down to the same wall and no further.
+Breaking through to the bore is an error rather than a warning -- past it the
+fastener has nothing to hold.
+
+It measures against the aperture solver's **own** tool depths rather than a
+second derivation of them, so it can only ever describe the volume that is
+actually subtracted, and it tests the boss circle against the opening rather than
+their bounding boxes, so a boss that merely shares a corner is not reported.
 
 Worth knowing what it does *not* fire on: a floor boss spans the inside floor to
 the underside of the board, while a side-wall opening is placed against the body
@@ -897,6 +903,43 @@ Validations that produce errors rather than geometry. Implemented:
 - `lidColumn` on a mount that fastens the board.
 
 Not yet: boss against a component body, an aperture, or the board edge.
+
+### 3.5 FDM design rule checks
+
+`FdmDesignRules` (§3.4) is the profile geometry is built *from*. The checks are
+the other direction: whether the finished solid still honours it, and whether it
+can be printed at all.
+
+They are constraints of the **process**, not of this package. A wall has a
+minimum thickness because of what a nozzle lays down; an opening has a maximum
+roof span because of what will bridge; a boss must encircle its insert because a
+broken ring has nothing to resist the press. An enclosure can be perfectly
+consistent -- every dimension correctly derived from every other -- and still be
+unprintable, and no stage of resolution is positioned to notice, because each
+sees only the feature it builds. So the checks run in one place, after
+composition, over resolved data.
+
+| Rule | Measures | Error when |
+| --- | --- | --- |
+| `wall_below_minimum_thickness` | side wall, floor, lid, lid lip | thinner than one extrusion |
+| `insert_not_encircled` | ring of material left around a bore | the bore is broken into |
+| `unsupported_bridge` | roof span of a side-wall aperture | never -- bridging degrades, it does not fail |
+
+Checking the *resolved* dimensions rather than the input is the point: a lip wall
+is a ratio of the side wall and a lid is raised to suit a fastener stack, so a
+thickness can fall below what the machine can print without any authored number
+doing so.
+
+This also required adding the printer to the profile at all -- nozzle diameter,
+minimum printable wall, bridge span, overhang angle. Every rule that existed
+before is a dimension of *this enclosure* or a fit between its parts; none
+described the machine, so `wallThickness: 2` was a default nobody could check.
+
+**Not yet checked: unsupported overhangs.** Unlike the three above it cannot be
+decided from resolved dimensions. It needs the composed solid and the print
+orientation of each part, because the same feature is an overhang or not
+depending on which way up it is printed -- a lid column hangs down from a lid
+printed one way and stands up from it printed the other.
 
 ---
 
@@ -953,7 +996,6 @@ The precedent is already here. Nobody stores "go right, then up, then via" -- yo
 declare a `<trace>` and the router re-derives the path whenever the board changes.
 An authored assembly sequence goes stale for precisely the reason a hand-drawn
 enclosure does.
-
 ### 5.1 Declare joints, derive orderings
 
 The reason an aperture survives its connector being moved or rotated is that the
