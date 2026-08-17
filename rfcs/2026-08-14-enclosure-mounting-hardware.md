@@ -902,7 +902,7 @@ Validations that produce errors rather than geometry. Implemented:
   `lidThickness` before it becomes an error;
 - `lidColumn` on a mount that fastens the board.
 
-Not yet: boss against a component body, an aperture, or the board edge.
+Not yet: boss against a component body, or against the board edge.
 
 ### 3.5 FDM design rule checks
 
