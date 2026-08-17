@@ -30,8 +30,8 @@ without interfering with the board's electrical BOM.
 | Records for authored aperture/boss intent | not proposed; apertures and bosses are solver inputs, consumed during the render |
 | `getPcbaBom` / `getEnclosureBom` / `getDeviceMbom` | proposed, blocked on the circuit-json records |
 | Core lowering of hardware geometry | deferred to Stage 2, with `assembly_component` |
-| FDM design rule checks (walls, insert encirclement, bridging, component clearance) | **implemented** |
-| Overhang checking | not started |
+| FDM design rule checks (§3.5) | **implemented** |
+| Overhang checking | a slicer concern; not planned here |
 | Derived bill of process (Part 5) | designed and prototyped; not built |
 | Hardware procurement engine (McMaster / Fastenal adapters) | proposed |
 | Cable, label, thermal-pad and packaging items | out of scope |
@@ -902,8 +902,6 @@ Validations that produce errors rather than geometry. Implemented:
   `lidThickness` before it becomes an error;
 - `lidColumn` on a mount that fastens the board.
 
-Not yet: boss against the board edge.
-
 ### 3.5 FDM design rule checks
 
 `FdmDesignRules` (§3.4) is the profile geometry is built *from*. The checks are
@@ -925,6 +923,7 @@ composition, over resolved data.
 | `insert_not_encircled` | ring of material left around a bore | the bore is broken into |
 | `unsupported_bridge` | roof span of a side-wall aperture | never -- bridging degrades, it does not fail |
 | `component_clearance` | gap from a boss or lid column to a part on the board | they interfere -- the board cannot seat |
+| `board_edge_clearance` | how far a mount sits inboard of the board edge | the mount is off the board entirely |
 
 `component_clearance` needs one thing the package did not previously take: the
 parts on the board. It is optional -- an enclosure can be solved without knowing
@@ -941,6 +940,15 @@ overlap test. A part is measured against the rectangle it actually occupies
 rather than the box that rectangle spans in board axes; for a long thin part
 turned 90 degrees the difference decides the answer.
 
+`board_edge_clearance` measures against the **board outline**, not the cavity,
+because it is about the board being supported rather than about anything fitting.
+A boss that runs past the board edge into the wall beside it is fine, and often
+deliberate; a board resting on half a boss is not, because tightening the screw
+tips it instead of clamping it flat. The screw head is measured the same way on a
+board mount, since it bears directly on the laminate. Placing a mount off the
+board is a different failure and reported as one: every mount hangs off a hole in
+the board, and out there is no hole.
+
 Checking the *resolved* dimensions rather than the input is the point: a lip wall
 is a ratio of the side wall and a lid is raised to suit a fastener stack, so a
 thickness can fall below what the machine can print without any authored number
@@ -951,11 +959,10 @@ minimum printable wall, bridge span, overhang angle. Every rule that existed
 before is a dimension of *this enclosure* or a fit between its parts; none
 described the machine, so `wallThickness: 2` was a default nobody could check.
 
-**Not yet checked: unsupported overhangs.** Unlike the three above it cannot be
-decided from resolved dimensions. It needs the composed solid and the print
-orientation of each part, because the same feature is an overhang or not
-depending on which way up it is printed -- a lid column hangs down from a lid
-printed one way and stands up from it printed the other.
+**Not checked here: unsupported overhangs.** They need the composed solid and the
+print orientation of each part -- the same feature is an overhang or not
+depending on which way up it is printed -- and a slicer already decides both. It
+stays a slicer concern.
 
 ---
 
