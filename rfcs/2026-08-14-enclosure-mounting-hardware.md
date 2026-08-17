@@ -30,8 +30,8 @@ without interfering with the board's electrical BOM.
 | Records for authored aperture/boss intent | not proposed; apertures and bosses are solver inputs, consumed during the render |
 | `getPcbaBom` / `getEnclosureBom` / `getDeviceMbom` | proposed, blocked on the circuit-json records |
 | Core lowering of hardware geometry | deferred to Stage 2, with `assembly_component` |
-| FDM design rule checks (wall thickness, insert encirclement, bridging) | **implemented** |
-| Overhang checking, and boss-versus-component | not started |
+| FDM design rule checks (walls, insert encirclement, bridging, component clearance) | **implemented** |
+| Overhang checking | not started |
 | Derived bill of process (Part 5) | designed and prototyped; not built |
 | Hardware procurement engine (McMaster / Fastenal adapters) | proposed |
 | Cable, label, thermal-pad and packaging items | out of scope |
@@ -902,7 +902,7 @@ Validations that produce errors rather than geometry. Implemented:
   `lidThickness` before it becomes an error;
 - `lidColumn` on a mount that fastens the board.
 
-Not yet: boss against a component body, or against the board edge.
+Not yet: boss against the board edge.
 
 ### 3.5 FDM design rule checks
 
@@ -924,6 +924,22 @@ composition, over resolved data.
 | `wall_below_minimum_thickness` | side wall, floor, lid, lid lip | thinner than one extrusion |
 | `insert_not_encircled` | ring of material left around a bore | the bore is broken into |
 | `unsupported_bridge` | roof span of a side-wall aperture | never -- bridging degrades, it does not fail |
+| `component_clearance` | gap from a boss or lid column to a part on the board | they interfere -- the board cannot seat |
+
+`component_clearance` needs one thing the package did not previously take: the
+parts on the board. It is optional -- an enclosure can be solved without knowing
+what is on the board, it just cannot be checked against it -- and carries a
+position, because `EnclosureComponentBody` describes a *part* while the same part
+appears at many places on many boards.
+
+Which features can foul which parts falls out of the geometry: a floor boss
+stands between the inside floor and the underside of the board, so it can only
+reach a bottom-side part, and a lid column runs from the board's top face to the
+lid, so it can only reach a top-side one. A part on the far side of the board is
+not that column's business, which is what makes this worth more than a plan-view
+overlap test. A part is measured against the rectangle it actually occupies
+rather than the box that rectangle spans in board axes; for a long thin part
+turned 90 degrees the difference decides the answer.
 
 Checking the *resolved* dimensions rather than the input is the point: a lip wall
 is a ratio of the side wall and a lid is raised to suit a fastener stack, so a
