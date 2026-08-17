@@ -924,6 +924,7 @@ composition, over resolved data.
 | `unsupported_bridge` | roof span of a side-wall aperture | never -- bridging degrades, it does not fail |
 | `component_clearance` | gap from a boss or lid column to a part on the board | they interfere -- the board cannot seat |
 | `board_edge_clearance` | how far a mount sits inboard of the board edge | the mount is off the board entirely |
+| `component_bounds_unknown` | -- | never; it reports that a rule could not decide |
 
 `component_clearance` needs one thing the package did not previously take: the
 parts on the board. It is optional -- an enclosure can be solved without knowing
@@ -948,6 +949,25 @@ tips it instead of clamping it flat. The screw head is measured the same way on 
 board mount, since it bears directly on the laminate. Placing a mount off the
 board is a different failure and reported as one: every mount hangs off a hole in
 the board, and out there is no hole.
+
+**What blocks full component checking is the data, not the check.** Collecting
+every part's envelope costs nothing: `getComponentBody` in core reads emitted
+records -- `cad_component.size`, `model_bounds`, `pcb_component.width/height` --
+and never loads a model, so gathering all of them is one pass over records
+already in memory. Measured on a board of six ordinary parts, though: six
+`cad_component` records, **zero** carrying `size` and **zero** carrying
+`model_bounds`, and `pcb_component.width/height` is pad extent rather than body
+(an 0402 measures 1.56 x 0.64; a pushbutton measures 0 x 0). So there is no
+component height in Circuit JSON today for the parts that matter, and the
+envelope that does exist describes the pads.
+
+That absence used to be invisible: a missing height defaulted to zero, every part
+read as too short to reach anything, and the check passed every board while
+appearing to work. It now reports `component_bounds_unknown` instead -- and only
+where the height would have decided the answer, since a part clear of every mount
+in plan is clear of it whatever its height. Making the enclosure actually check
+its components is therefore a change to what Circuit JSON records about a part,
+not a change here.
 
 Checking the *resolved* dimensions rather than the input is the point: a lip wall
 is a ratio of the side wall and a lid is raised to suit a fastener stack, so a
