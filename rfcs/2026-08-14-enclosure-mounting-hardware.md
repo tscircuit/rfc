@@ -165,7 +165,7 @@ component.
 </assembly.device>
 ```
 
-**where is the component located?** — In order to render the component (and its
+* **where is the component located?** — In order to render the component (and its
 aperture) it needs a physical location. The center and rotation of its nearest
 ancestor with a `pcb_component`, here `J1`, becomes the center and rotation for
 the assembly.component; we can add props for offsetting in each dimension,
@@ -173,18 +173,18 @@ such as x/y positioning, distanceAboveBoard, etc. Will probably have to play aro
 with this until it makes sense. If we want to author named parameters like
 cableStartX, that is a reasonable argument for assembly.ribboncable as a child of
 assembly.component.
-**where does the aperture get rendered?** - Because we can calculate the position
+* **where does the aperture get rendered?** - Because we can calculate the position
 and bounds for the assembly.component (during render), the enclosure renderer already
 knows how to locate the aperture with the same logic as is used for other components
 today, and assembly.component will gain cutoutApertureDirection to tell which way
 the aperture faces.
-**where is a component parented by enclosure located?** - We have a reference frame
+* **where is a component parented by enclosure located?** - We have a reference frame
 for the enclosure based on the board; placement props for other enclosure features
 (screw boss, cutout aperture) are located based on board props. In a future iteration,
 we will propose enclosure placement props to locate things like rubber feet. For
 now they can be specified as parented by the enclosure, but can't be positioned or
 rendered until we have placement props to locate them in reference to the enclosure.
-**which MBOM buys it, device or enclosure?** — the nearest ancestor that is an assembly
+* **which MBOM buys it, device or enclosure?** — the nearest ancestor that is an assembly
 node, here `D1` for SCN1, `EN1` for FOOT*. So a screen under a connector is a line in
 the device MBOM and not in the board EBOM.
 
@@ -334,7 +334,7 @@ what to skip.
 
 **For the record: a part with no position gets no `cad_component`.** Placement
 props for children of an enclosure come later. Until then such a part is a BOM
-line only — correct in the MBOM, absent from the 3D view, and carrying no model
+line only — correct in the MBOM, absent from the 3D view, and rendering no model
 string, since there is no geometry record to hold one. The frame is waiting
 whenever the props land, because the enclosure's `pcb_component` is a reference
 to the center of the board.
@@ -352,7 +352,8 @@ if (getSourceComponentBomClass(source_component) !== "pcba") continue
 
 This is the one place membership is not purely structural, confined to the two
 files whose whole job is deciding what the board assembler receives.
-## 7. Get the MBOM
+
+### 5.5 Get the MBOM
 
 ```ts
 import {
@@ -404,28 +405,3 @@ behavior.
 **A supplier adapter for hardware.** `findPart` gains the parameter, but no
 adapter answers one yet. Until it does, the catalog gives designations and no
 part numbers, which is valid for a specification part.
-
-## 8. Open questions
-
-1. **Supplier names.** `supplier_part_numbers` is a closed list of PCB suppliers
-   that cannot name McMaster-Carr or Fastenal. Does this mean we should split
-   out the parts engine with a similar interface?
-2. **A missing identity on `<assembly.component>`.** A part with neither a part
-   number nor a designation is an error. Is that too strict for a quick sketch,
-   or exactly right?
-3. **Whether `designation` should ever win over a part number.** Precedence says
-   the part number is more specific, so pinning one on a boss correctly splits a
-   line. There may be a case where an author wants the reverse.
-4. **Overriding one of two derived pieces.** A boss makes a screw and an insert,
-   and `enclosureScrewBossProps` has one `manufacturerPartNumber`.
-5. **A board reference on `<assembly.device>`.** It nests the board by position
-   today; `<enclosure.fdm.box>` uses a `boardRef` selector.
-6. **Changing the default of `list()`.** A no-op when it ships, but a silent
-   change to an existing API.
-
-## 9. Related documents
-
-- [`2026-08-14-enclosure-mounting-hardware.impl.md`][impl] — schemas, catalog,
-  geometry, design rules, staging
-- `2026-06-22-parametric-enclosures.md` — the enclosure box and apertures
-- `2026-08-14-3d-rotation-semantics.md` — rotation conventions
