@@ -1,4 +1,4 @@
-# Screw Bosses, Enclosure Mounting Hardware, and the Enclosure MBOM
+# Enclosure Mounting Hardware, Assembly Extensions
 
 ## Motivation
 
