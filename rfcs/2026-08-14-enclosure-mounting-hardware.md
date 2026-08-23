@@ -2,10 +2,7 @@
 
 ## Status
 
-Proposed. This document is the developer experience. Implementation detail is in
-[`2026-08-14-enclosure-mounting-hardware.impl.md`][impl].
-
-[impl]: ./2026-08-14-enclosure-mounting-hardware.impl.md
+Proposed.
 
 ## 1. Summary
 
@@ -14,7 +11,7 @@ Proposed. This document is the developer experience. Implementation detail is in
 You add a screw boss element to a mounting hole on a PCB. The render then adds a
 cylinder support column to the enclosure underneath that mounting hole, and
 makes the screws and other parts that the boss needs. The boss can use a short
-screw that holds the PCB to the enclosure, or a long screw that holds the lid 
+screw that holds the PCB to the enclosure, or a long screw that holds the lid
 and base of the enclosure together. This long screw can also retain the PCB
 with either a retention column connected to the lid, or a retention spacer.
 Screws can be specified as self-tapping or heat-set, and the appropriate cutouts
