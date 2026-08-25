@@ -64,10 +64,7 @@ export default () => (
         width="12.4mm"
         height="12.4mm"
         routingPhaseIndex={ROUTING_PHASE.final}
-        pcbLayout={{
-          pack: true,
-          algorithmFn: placeDecouplingCapacitors,
-        }}
+        pcbLayout={{ algorithmFn: placeDecouplingCapacitors }}
       >
         {u1DecouplingCapacitors.map(({ name, jlc, net }) => {
           const Part = capacitorParts[jlc];
@@ -97,17 +94,21 @@ and nets remain unchanged.
 
 For `U1_DECOUPLING`, routing phases below 6 finish before
 `placeDecouplingCapacitors` runs. The function places the unpositioned members
-of the group within its `width` and `height`, while respecting props such as
-`layer="bottom"`. The group's traces then route in phase 6.
+of the group while respecting props such as `layer="bottom"`. Its positions are
+bounded by the group's `width` and `height`. The group's traces then route in
+phase 6.
+
+Providing `pcbLayout.algorithmFn` selects that function instead of a built-in
+placement algorithm for the group.
 
 An explicit `routingPhaseIndex` on a descendant trace overrides the group
 default. A nested group with its own `routingPhaseIndex` overrides its parent
 for that nested group.
 
-Without `pcbLayout.algorithmFn`, the selected built-in PCB layout behavior is
-unchanged. Without `routingPhaseIndex` on a group, current placement and routing
-behavior is unchanged.
+Without `pcbLayout.algorithmFn`, current PCB placement behavior is unchanged.
+Without `routingPhaseIndex` on a group, current placement and routing behavior
+is unchanged.
 
 If the custom placement algorithm fails or does not place every unpositioned
-member, tscircuit reports a PCB packing error for the group. It does not silently
-fall back to another placement algorithm or route that group's traces.
+member, tscircuit reports a PCB placement error for the group. It does not
+silently fall back to another placement algorithm or route that group's traces.
