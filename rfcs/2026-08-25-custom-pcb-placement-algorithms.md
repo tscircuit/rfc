@@ -13,11 +13,13 @@ capacitors.
 
 ## Proposed API
 
-This RFC adds two author-facing capabilities to `<group>`:
+This RFC adds three author-facing capabilities to `<group>`:
 
 1. `pcbLayout.algorithmFn` selects a custom PCB placement algorithm.
-2. `routingPhaseIndex` schedules the group and supplies the default routing
-   phase for its descendant traces.
+2. `routingPhaseIndex` assigns the group's numeric routing phase and supplies
+   the default for its descendant traces.
+3. `runAfterRoutingPhase` delays the group's PCB placement until lower routing
+   phases finish.
 
 All other props in the example already exist.
 
@@ -64,6 +66,7 @@ export default () => (
         width="12.4mm"
         height="12.4mm"
         routingPhaseIndex={ROUTING_PHASE.final}
+        runAfterRoutingPhase
         pcbLayout={{ algorithmFn: placeDecouplingCapacitors }}
       >
         {u1DecouplingCapacitors.map(({ name, jlc, net }) => {
@@ -92,11 +95,17 @@ and nets remain unchanged.
 
 ## Behavior
 
-For `U1_DECOUPLING`, routing phases below 6 finish before
-`placeDecouplingCapacitors` runs. The function places the unpositioned members
-of the group while respecting props such as `layer="bottom"`. Its positions are
-bounded by the group's `width` and `height`. The group's traces then route in
-phase 6.
+For `U1_DECOUPLING`, `runAfterRoutingPhase` makes the group's PCB components
+invisible and unavailable while routing phases below 6 run. Those routes do not
+avoid or connect to the delayed components.
+
+After those phases finish, `placeDecouplingCapacitors` runs using their routed
+result. It places the group members while respecting props such as
+`layer="bottom"`, with positions bounded by the group's `width` and `height`.
+The placed components then become visible and available, and the group's
+descendant traces route in phase 6.
+
+The ordering is: routing phases 1–5 → custom PCB placement → routing phase 6.
 
 Providing `pcbLayout.algorithmFn` selects that function instead of a built-in
 placement algorithm for the group.
@@ -107,7 +116,8 @@ for that nested group.
 
 Without `pcbLayout.algorithmFn`, current PCB placement behavior is unchanged.
 Without `routingPhaseIndex` on a group, current placement and routing behavior
-is unchanged.
+is unchanged. Without `runAfterRoutingPhase`, current component availability
+and placement timing are unchanged.
 
 If the custom placement algorithm fails or does not place every unpositioned
 member, tscircuit reports a PCB placement error for the group. It does not
