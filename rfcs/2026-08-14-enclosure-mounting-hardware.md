@@ -94,25 +94,22 @@ Assembly cables can be inferred from `assembly.screen` or other elements.
 
 ## Rendering the enclosure mounting hardware
 
-Mounting hardware has to be *visible*, and specifically visible **inside** a
-closed enclosure: the reason to draw a bolt is to see that it reaches its insert
-and does not collide with the board.
+Hardware must be visible **inside** a closed enclosure — the reason to draw a
+bolt is to see it reach its insert and clear the board.
 
 ### Where the geometry comes from
 
-A parametric fastener part has no CAD file, so hardware is **generated from its
-specification** rather than downloaded. It follows the split the codebase
-already uses for footprints:
+A parametric fastener has no CAD file, so it is **generated from its
+specification**, following the split already used for footprints:
 
 | Layer | Owns | Hardware |
 |---|---|---|
 | `footprinter` / `modelprinter` | string → validated params. No family dimensions. | new `screw` / `insert` / `spacer` model families |
-| `jscad-electronics` | "the specific model family parameters" + geometry | new `jscad-assembly-hardware` |
+| `jscad-electronics` | model family parameters + geometry | new `jscad-assembly-hardware` |
 
-So `modelprinter` learns the grammar, and a new `jscad-assembly-hardware`
-package owns the dimension tables (thread, head, insert series) and turns them
-into solids. This mirrors `flexscreen`, whose schema lives in `modelprinter`
-while `DEFAULT_DIAGONAL` and the mesh live in `jscad-electronics`.
+`modelprinter` learns the grammar; `jscad-assembly-hardware` owns the dimension
+tables (thread, head, insert series) and the solids. Same split as `flexscreen`:
+schema in `modelprinter`, `DEFAULT_DIAGONAL` and the mesh in `jscad-electronics`.
 
 ```
 screw_m3_l8_buttonhead       heatsetinsert_m3_l4      bolt_m3_l10_socketcap
@@ -125,17 +122,11 @@ pan head, flat head, countersunk, socket cap, hex flange, etc)
 
 ### How a piece reaches Circuit JSON
 
-The enclosure solver already resolves each mount into pieces carrying a
-position and a hardware string.
-
-Each piece is rendered as a `cad_component`, which needs both a
-`source_component_id` and a `pcb_component_id` — both required. **The fastener
-carries them, not the hole.** A screw or bolt is a real part with a designation
-and an MPN, so a `source_component` is what it already deserves for the BOM, and
-one element then supplies both ids.
-
-The fastener gets a zero-size `pcb_component` centred on its hole, suppressed
-from placement and DRC — the pattern `enclosure.fdm.box` already uses:
+Each piece renders as a `cad_component`, which requires both a
+`source_component_id` and a `pcb_component_id`. **The fastener carries both, not
+the hole** — it is a real part, so the `source_component` is one it already
+deserves for the BOM. It gets a zero-size `pcb_component` centred on its hole,
+suppressed from placement and DRC, as `enclosure.fdm.box` already does:
 
 ```ts
 pcb_component.insert({ center: holePosition, width: 0, height: 0,
@@ -143,16 +134,12 @@ pcb_component.insert({ center: holePosition, width: 0, height: 0,
   do_not_place: true, is_allowed_to_be_off_board: true })
 ```
 
-The hole cannot supply this itself: `pcb_component.source_component_id` is
-required, so giving a hole a `pcb_component` would also make it a
-`source_component` — a board feature promoted to a BOM line. A board-level
-`<hole />` emits `pcb_component_id: null` today.
+A hole cannot supply this: `pcb_component.source_component_id` is required, so
+the hole would become a BOM line. (Board-level holes emit `pcb_component_id:
+null` today.)
 
-This is additive: `<assembly.screw />` currently emits no Circuit JSON at all,
-and no schema change is needed. It is also **interim** — the right long-term
-record is the `assembly_component` the solver's types already anticipate, which
-would carry the piece, its designation and its BOM grouping without borrowing a
-board component's frame.
+Additive, no schema change — but interim; `assembly_component` remains the right
+long-term record.
 
 ### Section views
 
@@ -160,10 +147,6 @@ board component's frame.
   hatched cap, giving a conventional section view.
 - `showHiddenEdges` (already carried from `cad_component` into the renderer)
   draws occluded edges.
-
-A section through the mount axis is the view that answers the question the
-hardware exists to raise: engagement, clearance, and whether the bolt bottoms
-out.
 
 ## New Elements
 
