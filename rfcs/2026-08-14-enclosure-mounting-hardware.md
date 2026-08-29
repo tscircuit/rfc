@@ -42,7 +42,7 @@ Alternative accepted syntax:
 <assembly.device>
   <board name="B1" width="40mm" height="24mm">
     <hole name="H1" pcbX={-15} pcbY={-8} diameter="3.2mm">
-      <assembly.screw thread="m2.5" designation="phillips pan-head plastite thread-forming screw for thermoplastic"/>
+      <assembly.screw thread="m2.5"/>
     </hole>
   </board>
   <enclosure.fdm.box name="EN1" boardRef=".B1" />
@@ -56,7 +56,7 @@ Alternative accepted syntax:
   <board name="B1" width="40mm" height="24mm">
     <hole name="H1" pcbX={-15} pcbY={-8} diameter="3.2mm" />
   </board>
-  <assembly.screw thread="m2.5" designation="phillips pan-head plastite thread-forming screw for thermoplastic" holeRef=".B1 .H1" />
+  <assembly.screw thread="m2.5" holeRef=".B1 .H1" />
   <enclosure.fdm.box name="EN1" boardRef=".B1" />
 </assembly.device>
 ```
@@ -92,8 +92,7 @@ Assembly cables can be inferred from `assembly.screen` or other elements.
 - `connectsTo` can be an array with at most two selectors
 - Cable models can be inferred from connectors or specified
 
-
-## Rendering hardware
+## Rendering the enclosure mounting hardware
 
 Mounting hardware has to be *visible*, and specifically visible **inside** a
 closed enclosure: the reason to draw a bolt is to see that it reaches its insert
@@ -101,7 +100,7 @@ and does not collide with the board.
 
 ### Where the geometry comes from
 
-A purchased part has no CAD file, so hardware is **generated from its
+A parametric fastener part has no CAD file, so hardware is **generated from its
 specification** rather than downloaded. It follows the split the codebase
 already uses for footprints:
 
@@ -116,43 +115,51 @@ into solids. This mirrors `flexscreen`, whose schema lives in `modelprinter`
 while `DEFAULT_DIAGONAL` and the mesh live in `jscad-electronics`.
 
 ```
-screw_m3_l8_socketcap        insert_m3_l4_heatset        spacer_od5_id3_l6
+screw_m3_l8_buttonhead       heatsetinsert_m3_l4      bolt_m3_l10_socketcap
 ```
 
-Threads are not modelled. A helix costs a great many triangles to say something
-the designation already states exactly, and nothing downstream measures it.
-
-Every model is built with **+Z along the fastener axis** and the origin at the
-part's **seating face** — the underside of a screw head, the end of an insert
-that meets its mating surface — so no model needs to know where in an enclosure
-it ended up.
+Threads and drive recess are not modelled, only basic shapes of the screw/bolt
+body and head are needed at this time. Drive type can be selected by the assembler,
+but head shape is required for fitting the enclosure recess, if any (button head,
+pan head, flat head, countersunk, socket cap, hex flange, etc)
 
 ### How a piece reaches Circuit JSON
 
 The enclosure solver already resolves each mount into pieces carrying a
-position and a hardware string. The open question is what record carries them.
+position and a hardware string.
 
-`cad_component` works today — both renderers dispatch on `model_jscad`, so
-nothing new is needed to see hardware. But it requires a `pcb_component_id`,
-and **assembly hardware has no `pcb_component`**, so a piece would borrow the
-frame of its nearest framed ancestor (`pcb_component_id` = the frame it renders
-in, `source_component_id` = the piece). The enclosure's own base and lid already
-do this.
+Each piece is rendered as a `cad_component`, which needs both a
+`source_component_id` and a `pcb_component_id` — both required. **The fastener
+carries them, not the hole.** A screw or bolt is a real part with a designation
+and an MPN, so a `source_component` is what it already deserves for the BOM, and
+one element then supplies both ids.
 
-The alternative is the `assembly_component` record already anticipated in the
-solver's types, which would carry the piece, its designation and its BOM
-grouping without pretending to be a board component. **Which of these is
-intended is the main thing this section is asking.**
+The fastener gets a zero-size `pcb_component` centred on its hole, suppressed
+from placement and DRC — the pattern `enclosure.fdm.box` already uses:
+
+```ts
+pcb_component.insert({ center: holePosition, width: 0, height: 0,
+  source_component_id, obstructs_within_bounds: false,
+  do_not_place: true, is_allowed_to_be_off_board: true })
+```
+
+The hole cannot supply this itself: `pcb_component.source_component_id` is
+required, so giving a hole a `pcb_component` would also make it a
+`source_component` — a board feature promoted to a BOM line. A board-level
+`<hole />` emits `pcb_component_id: null` today.
+
+This is additive: `<assembly.screw />` currently emits no Circuit JSON at all,
+and no schema change is needed. It is also **interim** — the right long-term
+record is the `assembly_component` the solver's types already anticipate, which
+would carry the piece, its designation and its BOM grouping without borrowing a
+board component's frame.
 
 ### Section views
-
-Hardware is interesting exactly where it is hidden, so a rendered assembly can
-be cut:
 
 - `gltf-slice` cuts the glTF on a plane and closes each cut surface with a
   hatched cap, giving a conventional section view.
 - `showHiddenEdges` (already carried from `cad_component` into the renderer)
-  draws occluded edges instead, when a cut is too destructive.
+  draws occluded edges.
 
 A section through the mount axis is the view that answers the question the
 hardware exists to raise: engagement, clearance, and whether the bolt bottoms
