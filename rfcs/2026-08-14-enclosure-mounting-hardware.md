@@ -122,15 +122,11 @@ pan head, flat head, countersunk, socket cap, hex flange, etc).
 
 ### How mounting hardware reaches Circuit JSON
 
-A mount resolves into one *piece* per part: a screw alone, or an insert **and**
-a bolt, plus a spacer where needed. **Each piece** is a BOM line and gets its
-own `source_component`, zero-size `pcb_component` and `cad_component` — same XY
-(the mount axis), different Z. The hole carries none of them: one hole can hold
-two pieces, and `pcb_component.source_component_id` is required, so a hole would
-become a BOM line too.
-
-Each `pcb_component` is centred on the hole and suppressed from placement and
-DRC, as `enclosure.fdm.box` already does.
+A mount resolves into one *piece* per part: a screw alone, or an heat set insert
+**and** a bolt. **Each piece** is a BOM line and gets its own `source_component`,
+zero-size `pcb_component` and `cad_component` — same XY (the mount axis), different Z.
+These pcb_components are suppressed from placement and DRC, as `enclosure.fdm.box`
+already does.
 
 ### Section views
 
