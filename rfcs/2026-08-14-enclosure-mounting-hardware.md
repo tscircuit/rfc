@@ -93,11 +93,77 @@ Assembly cables can be inferred from `assembly.screen` or other elements.
 - Cable models can be inferred from connectors or specified
 
 
+## Rendering hardware
+
+Mounting hardware has to be *visible*, and specifically visible **inside** a
+closed enclosure: the reason to draw a bolt is to see that it reaches its insert
+and does not collide with the board.
+
+### Where the geometry comes from
+
+A purchased part has no CAD file, so hardware is **generated from its
+specification** rather than downloaded. It follows the split the codebase
+already uses for footprints:
+
+| Layer | Owns | Hardware |
+|---|---|---|
+| `footprinter` / `modelprinter` | string → validated params. No family dimensions. | new `screw` / `insert` / `spacer` model families |
+| `jscad-electronics` | "the specific model family parameters" + geometry | new `jscad-assembly-hardware` |
+
+So `modelprinter` learns the grammar, and a new `jscad-assembly-hardware`
+package owns the dimension tables (thread, head, insert series) and turns them
+into solids. This mirrors `flexscreen`, whose schema lives in `modelprinter`
+while `DEFAULT_DIAGONAL` and the mesh live in `jscad-electronics`.
+
+```
+screw_m3_l8_socketcap        insert_m3_l4_heatset        spacer_od5_id3_l6
+```
+
+Threads are not modelled. A helix costs a great many triangles to say something
+the designation already states exactly, and nothing downstream measures it.
+
+Every model is built with **+Z along the fastener axis** and the origin at the
+part's **seating face** — the underside of a screw head, the end of an insert
+that meets its mating surface — so no model needs to know where in an enclosure
+it ended up.
+
+### How a piece reaches Circuit JSON
+
+The enclosure solver already resolves each mount into pieces carrying a
+position and a hardware string. The open question is what record carries them.
+
+`cad_component` works today — both renderers dispatch on `model_jscad`, so
+nothing new is needed to see hardware. But it requires a `pcb_component_id`,
+and **assembly hardware has no `pcb_component`**, so a piece would borrow the
+frame of its nearest framed ancestor (`pcb_component_id` = the frame it renders
+in, `source_component_id` = the piece). The enclosure's own base and lid already
+do this.
+
+The alternative is the `assembly_component` record already anticipated in the
+solver's types, which would carry the piece, its designation and its BOM
+grouping without pretending to be a board component. **Which of these is
+intended is the main thing this section is asking.**
+
+### Section views
+
+Hardware is interesting exactly where it is hidden, so a rendered assembly can
+be cut:
+
+- `gltf-slice` cuts the glTF on a plane and closes each cut surface with a
+  hatched cap, giving a conventional section view.
+- `showHiddenEdges` (already carried from `cad_component` into the renderer)
+  draws occluded edges instead, when a cut is too destructive.
+
+A section through the mount axis is the view that answers the question the
+hardware exists to raise: engagement, clearance, and whether the bolt bottoms
+out.
+
 ## New Elements
 
 - `<enclosure.fdm.heatsetinsert />`
 - `<assembly.screen />`
 - `<assembly.bolt />`
+- `<assembly.screw />`
 - `<assembly.cable />`
 
 ## New Properties
