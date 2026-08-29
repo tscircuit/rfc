@@ -118,28 +118,19 @@ screw_m3_l8_buttonhead       heatsetinsert_m3_l4      bolt_m3_l10_socketcap
 Threads and drive recess are not modelled, only basic shapes of the screw/bolt
 body and head are needed at this time. Drive type can be selected by the assembler,
 but head shape is required for fitting the enclosure recess, if any (button head,
-pan head, flat head, countersunk, socket cap, hex flange, etc)
+pan head, flat head, countersunk, socket cap, hex flange, etc).
 
-### How a piece reaches Circuit JSON
+### How mounting hardware reaches Circuit JSON
 
-Each piece renders as a `cad_component`, which requires both a
-`source_component_id` and a `pcb_component_id`. **The fastener carries both, not
-the hole** — it is a real part, so the `source_component` is one it already
-deserves for the BOM. It gets a zero-size `pcb_component` centred on its hole,
-suppressed from placement and DRC, as `enclosure.fdm.box` already does:
+A mount resolves into one *piece* per part: a screw alone, or an insert **and**
+a bolt, plus a spacer where needed. **Each piece** is a BOM line and gets its
+own `source_component`, zero-size `pcb_component` and `cad_component` — same XY
+(the mount axis), different Z. The hole carries none of them: one hole can hold
+two pieces, and `pcb_component.source_component_id` is required, so a hole would
+become a BOM line too.
 
-```ts
-pcb_component.insert({ center: holePosition, width: 0, height: 0,
-  source_component_id, obstructs_within_bounds: false,
-  do_not_place: true, is_allowed_to_be_off_board: true })
-```
-
-A hole cannot supply this: `pcb_component.source_component_id` is required, so
-the hole would become a BOM line. (Board-level holes emit `pcb_component_id:
-null` today.)
-
-Additive, no schema change — but interim; `assembly_component` remains the right
-long-term record.
+Each `pcb_component` is centred on the hole and suppressed from placement and
+DRC, as `enclosure.fdm.box` already does.
 
 ### Section views
 
