@@ -3,10 +3,12 @@
 ## Motivation
 
 We want to be able to specify how an enclosure and a PCB fit together, this requires introducing additional
-hardware such as heat set inserts and bolts.
+hardware such as heat set inserts, which are fastened with bolts, and screws, which are self-tapping.
 
 
-## Example Usage: Heat set inserts
+## Securing the PCB
+
+### Heat set insert and bolt
 
 ```tsx
 <assembly.device>
@@ -30,6 +32,31 @@ Alternative accepted syntax:
   </board>
   <enclosure.fdm.heatsetinsert thread="m3" holeRef=".B1 .H1" />
   <assembly.bolt thread="m3" length="10mm" holeRef=".B1 .H1" fastensLid />
+  <enclosure.fdm.box name="EN1" boardRef=".B1" />
+</assembly.device>
+```
+
+### Self-tapping/thread-forming screw
+
+```tsx
+<assembly.device>
+  <board name="B1" width="40mm" height="24mm">
+    <hole name="H1" pcbX={-15} pcbY={-8} diameter="3.2mm">
+      <assembly.screw thread="m2.5" designation="phillips pan-head plastite thread-forming screw for thermoplastic"/>
+    </hole>
+  </board>
+  <enclosure.fdm.box name="EN1" boardRef=".B1" />
+</assembly.device>
+```
+
+Alternative accepted syntax:
+
+```tsx
+<assembly.device>
+  <board name="B1" width="40mm" height="24mm">
+    <hole name="H1" pcbX={-15} pcbY={-8} diameter="3.2mm" />
+  </board>
+  <assembly.screw thread="m2.5" designation="phillips pan-head plastite thread-forming screw for thermoplastic" holeRef=".B1 .H1" />
   <enclosure.fdm.box name="EN1" boardRef=".B1" />
 </assembly.device>
 ```
@@ -75,7 +102,6 @@ Assembly cables can be inferred from `assembly.screen` or other elements.
 
 ## New Properties
 
-- `<hole />`: `selfTapping`
 - `<assembly.device />`: `cadModel="..."`, allows specifying the cadModel for a
   device that is not a board
 - - `cadModel` can be a footprinter or modelprinter string (e.g. `flexscreen`)
