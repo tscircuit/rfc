@@ -63,16 +63,99 @@ Alternative accepted syntax:
 
 ## `<assembly.screen />` usage
 
-
 ```tsx
 <assembly.device>
   <board name="B1" width="40mm" height="24mm">
-    <connector name="J1" footprint="fpc24" />
+    <connector name="J1" footprint="fpc24" pcbRotation={180} />
   </board>
 
-  <assembly.screen name="SCREEN" connectsTo=".B1 .J1" width="2.3in" height="1.8in" />
+  <assembly.screen
+    name="SCREEN"
+    connectsTo=".B1 .J1"
+    width="2.3in"
+    height="1.8in"
+  />
 </assembly.device>
 ```
+
+### Screen properties
+
+| Property | Type | Required | Meaning |
+|---|---|---|---|
+| `name` | `string` | yes | Assembly identity and the standard name selector, for example `.SCREEN`. |
+| `connectsTo` | `string` | yes | Exactly one selector resolving to the PCB connector that receives the screen's flex cable. |
+| `width` | distance | yes | Outer screen-body width, including the bezel and excluding the flex cable. Must be greater than zero. |
+| `height` | distance | yes | Outer screen-body height, including the bezel and excluding the flex cable. Must be greater than zero. |
+| `cadModel` | `string` | no | An explicit footprinter/modelprinter model string. It replaces the derived `flexscreen` string. |
+
+Unlike `<assembly.cable />`, a screen has one connector endpoint. An array is
+not accepted for `connectsTo`, and resolving zero or more than one component is
+an authoring error. Resolution starts at the nearest containing
+`<assembly.device />` and crosses nested assembly-device and board/subcircuit
+boundaries. The selected element must produce a `pcb_component`; normally it is
+a `<connector />`.
+
+`assembly.screen` is an assembly-device subtype in the authoring tree. Code
+that tests whether a node is an assembly device must therefore include screens,
+and nested-device traversal must descend through one. `.SCREEN` is the
+canonical selector for the screen above. The namespaced JSX spelling
+`assembly.screen` is not itself a CSS selector (in CSS it would mean an
+`assembly` element with class `screen`); a durable Circuit JSON type selector is
+deferred with the durable assembly schema described below.
+
+### Screen CAD model
+
+When `cadModel` is absent, Core normalizes `width` and `height` to millimetres
+and derives this modelprinter string:
+
+```text
+flexscreen_w<width-mm>mm_h<height-mm>mm
+```
+
+For example, `width="2.3in" height="1.8in"` becomes
+`flexscreen_w58.42mm_h45.72mm`. The serialization must be stable, must not keep
+the source units, and must not add insignificant trailing zeroes. The string is
+stored in `cad_component.footprinter_string`; despite that field's legacy name,
+renderers inspect the model family and route `flexscreen` through
+`modelprinter`.
+
+An explicit `cadModel` is an escape hatch and is copied verbatim instead of the
+derived string. This permits modelprinter modifiers such as flex length,
+folding, conductor count, and offsets without growing the first
+`assembly.screen` props surface. `width` and `height` remain required assembly
+facts; during the compatibility stage Core does not try to prove that an
+explicit model string has matching dimensions.
+
+### Connector-relative placement
+
+The flexscreen model's local origin is the connector-end board datum, its cable
+leaves along local `+Y`, and local `+Z` points out of the board face. Core places
+that origin only after the target connector's footprint has loaded and its PCB
+layout, layer transform, anchor alignment, and rotation are final. Pre-layout
+JSX coordinates must not be used.
+
+The placement rules are:
+
+1. XY is the target `pcb_component.cable_insertion_center`, falling back to the
+   target `pcb_component.center` only when no insertion center is available.
+2. Z is the surface of the target connector's owning board: `+thickness / 2`
+   for a top-layer connector and `-thickness / 2` for a bottom-layer connector.
+   The owning board is used even when the assembly contains multiple boards.
+3. Local `+Z` is transformed to the outward normal of that board face. Thus a
+   bottom-layer screen is below the board rather than being left above it.
+4. Local cable `+Y` is aligned to the connector's final cable insertion axis.
+   Prefer the continuous footprint insertion vector after the connector's final
+   rotation and layer mirroring; the quantized
+   `pcb_component.insertion_direction` alone is insufficient for arbitrary
+   angles. If the footprint supplies no such vector, use the direction from the
+   component center to `cable_insertion_center`, then fall back to the
+   connector's final PCB rotation.
+
+Consequently, rotating, packing, or moving the connector moves the screen, and
+flipping it to the bottom layer flips the complete screen/flex assembly. Core
+must write `model_origin_position: { x: 0, y: 0, z: 0 }` on the compatibility
+`cad_component`; otherwise a renderer may infer a bounding-box center and
+detach the flex origin from the connector.
 
 
 ## `<assembly.cable />` usage
@@ -128,6 +211,32 @@ zero-size `pcb_component` and `cad_component` — same XY (the mount axis), diff
 These pcb_components are suppressed from placement and DRC, as `enclosure.fdm.box`
 already does.
 
+### Assembly screen Circuit JSON compatibility stage
+
+The initial `assembly.screen` rollout does not require a new Circuit JSON
+element. Each screen emits the same compatibility ownership chain used by
+generated enclosure parts:
+
+- one `source_component` with the screen's name (temporarily represented as a
+  `simple_chip`) so the screen is addressable and is one BOM line;
+- one zero-size `pcb_component`, linked to that source component, with
+  `do_not_place: true`, `obstructs_within_bounds: false`, and
+  `is_allowed_to_be_off_board: true`; and
+- one `cad_component`, linked to both compatibility owners, with the placement
+  above, `model_unit_to_mm_scale_factor: 1`, explicit zero model origin, and the
+  derived or authored model string in `footprinter_string`.
+
+The `simple_chip` ftype is only a compatibility carrier; it does not make a
+screen an electrical chip. The synthetic PCB component does not participate in
+placement or clearance checks and is updated from the connector's final PCB
+transform before CAD is emitted.
+
+A later Circuit JSON migration may add `source_assembly_device`, an explicit
+screen/device kind, parent assembly IDs, and durable selector/BOM scope. That
+migration is deliberately deferred: consumers must not infer assembly nesting
+from the temporary source/PCB/CAD IDs, and Core's authoring-tree relationship
+remains the source of truth until the durable records exist.
+
 ### Section views
 
 - `gltf-slice` cuts the glTF on a plane and closes each cut surface with a
@@ -147,7 +256,9 @@ already does.
 
 - `<assembly.device />`: `cadModel="..."`, allows specifying the cadModel for a
   device that is not a board
-- - `cadModel` can be a footprinter or modelprinter string (e.g. `flexscreen`)
+  - `cadModel` can be a footprinter or modelprinter string (e.g. `flexscreen`)
+- `<assembly.screen />`: required `name`, single-selector `connectsTo`, positive
+  `width` and `height`, plus the inherited optional `cadModel` string override
 
 ## Changes to `assembly.device`
 
