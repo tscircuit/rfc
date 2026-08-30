@@ -78,15 +78,32 @@ Alternative accepted syntax:
 </assembly.device>
 ```
 
+The dimensions may instead come from an explicit modelprinter model:
+
+```tsx
+<assembly.screen
+  name="SCREEN"
+  connectsTo=".B1 .J1"
+  cadModel="flexscreen_w58.42mm_h45.72mm_flex28mm"
+/>
+```
+
 ### Screen properties
 
 | Property | Type | Required | Meaning |
 |---|---|---|---|
 | `name` | `string` | yes | Assembly identity and the standard name selector, for example `.SCREEN`. |
 | `connectsTo` | `string` | yes | Exactly one selector resolving to the PCB connector that receives the screen's flex cable. |
-| `width` | distance | yes | Outer screen-body width, including the bezel and excluding the flex cable. Must be greater than zero. |
-| `height` | distance | yes | Outer screen-body height, including the bezel and excluding the flex cable. Must be greater than zero. |
-| `cadModel` | `string` | no | An explicit footprinter/modelprinter model string. It replaces the derived `flexscreen` string. |
+| `width` | distance | conditional | Outer screen-body width, including the bezel and excluding the flex cable. Must be greater than zero and supplied together with `height`. |
+| `height` | distance | conditional | Outer screen-body height, including the bezel and excluding the flex cable. Must be greater than zero and supplied together with `width`. |
+| `cadModel` | `string` | conditional | An explicit modelprinter model string. It is required when `width` and `height` are omitted and replaces the derived `flexscreen` string. |
+
+The screen must have at least one complete sizing source: either the
+`width`/`height` pair or `cadModel`. Supplying `cadModel` together with the
+complete dimension pair is also accepted for compatibility and for retaining
+nominal assembly dimensions. A single `width` or `height` is always an error,
+including when `cadModel` is present, and omitting all three properties is an
+error.
 
 Unlike `<assembly.cable />`, a screen has one connector endpoint. An array is
 not accepted for `connectsTo`, and resolving zero or more than one component is
@@ -105,8 +122,8 @@ deferred with the durable assembly schema described below.
 
 ### Screen CAD model
 
-When `cadModel` is absent, Core normalizes `width` and `height` to millimetres
-and derives this modelprinter string:
+When `cadModel` is absent, Core normalizes the required `width`/`height` pair to
+millimetres and derives this modelprinter string:
 
 ```text
 flexscreen_w<width-mm>mm_h<height-mm>mm
@@ -120,11 +137,15 @@ renderers inspect the model family and route `flexscreen` through
 `modelprinter`.
 
 An explicit `cadModel` is an escape hatch and is copied verbatim instead of the
-derived string. This permits modelprinter modifiers such as flex length,
-folding, conductor count, and offsets without growing the first
-`assembly.screen` props surface. `width` and `height` remain required assembly
-facts; during the compatibility stage Core does not try to prove that an
-explicit model string has matching dimensions.
+derived string. This permits the modelprinter string to supply the body
+dimensions as well as modifiers such as flex length, folding, conductor count,
+and offsets without growing the first `assembly.screen` props surface.
+
+When both `cadModel` and `width`/`height` are supplied, `cadModel` is
+authoritative for rendered geometry; the separate dimensions do not resize or
+rewrite it. During the compatibility stage Core does not try to prove that an
+explicit model string has matching dimensions. Consumers that need dimensions
+when the pair is omitted must obtain them from the parsed/generated model.
 
 ### Connector-relative placement
 
@@ -257,8 +278,9 @@ remains the source of truth until the durable records exist.
 - `<assembly.device />`: `cadModel="..."`, allows specifying the cadModel for a
   device that is not a board
   - `cadModel` can be a footprinter or modelprinter string (e.g. `flexscreen`)
-- `<assembly.screen />`: required `name`, single-selector `connectsTo`, positive
-  `width` and `height`, plus the inherited optional `cadModel` string override
+- `<assembly.screen />`: required `name`, single-selector `connectsTo`, and
+  either a positive `width`/`height` pair or a non-empty `cadModel` modelprinter
+  string; the complete pair may also accompany `cadModel`
 
 ## Changes to `assembly.device`
 
