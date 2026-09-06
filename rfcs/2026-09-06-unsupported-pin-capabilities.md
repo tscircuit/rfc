@@ -1,190 +1,96 @@
 # Explicitly Unsupported Pin Capabilities
 
-Add `unsupportedCapabilities` to `pinAttributes` so a component can explicitly
-declare that a pin does not support an I2C, SPI, or UART function. Configuring that
-pin for the unsupported function must produce a pin specification error. Omitted
-capability information continues to mean unknown.
+## Motivation
 
-This is a proposed API. The examples require changes to `props` and `core` and a
-released version of the checker proposed in [checks PR #266](https://github.com/tscircuit/checks/pull/266).
+An RP2040 controller board connects GPIO20 to an IMU's I2C SDA line and GPIO21 to
+SCL. These are valid hardware I2C0 assignments. Swapping their roles would be
+invalid for the hardware I2C peripheral, according to the
+[RP2040 pin function table](https://datasheets.raspberrypi.com/rp2040/rp2040-datasheet.pdf#page=13).
 
-## Bad case: Configuring an unsupported function
+Today, a board can connect those pins to nets named `I2C_SDA` and `I2C_SCL` without
+declaring their peripheral functions. The imported component may contain only
+pin labels and power attributes. That gives the checker no capability information
+to validate the assignment.
 
-```tsx
-export default () => (
-  <board width="20mm" height="20mm">
-    <chip
-      name="U1"
-      footprint="soic8"
-      pinLabels={{ pin1: "GPIO0" }}
-      pinAttributes={{
-        GPIO0: {
-          unsupportedCapabilities: ["i2c_scl"],
-          activeCapability: "i2c_scl",
-        },
-      }}
-    />
-  </board>
-)
-```
+Even when the board declares `activeCapability`, `pinAttributes` can only list
+supported functions. It cannot explicitly say that GPIO20 does not support
+hardware I2C SCL. Core only writes `true` for listed capabilities, while
+[checks PR #266](https://github.com/tscircuit/checks/pull/266) needs explicit `false`
+support attributes to report an unsupported assignment.
 
-The relevant attributes on GPIO0's `source_port` must be:
+## Proposal
 
-```json
-{
-  "supports_i2c_scl": false,
-  "is_configured_for_i2c_scl": true
-}
-```
+Add `unsupportedCapabilities` to `pinAttributes`, using the same I2C, SPI, and UART
+function names as `capabilities`. Component definitions provide the supported and
+unsupported functions; board designs select the active function.
 
-The pin specification checker must emit one `source_component_misconfigured_error`
-for this pin, with its source component and source port references. Its message
-identifies the unsupported active function:
-
-```text
-U1 pin GPIO0 is configured for unsupported peripheral functions: I2C SCL
-```
-
-If multiple active functions on one pin are explicitly unsupported, list them in
-one error. Other pin specification warnings may also be emitted for this minimal
-example.
-
-## Good case: Configuring a supported function
+For the RP2040 example, the combined attributes would be:
 
 ```tsx
 pinAttributes={{
-  GPIO0: {
-    capabilities: ["uart_tx"],
+  GPIO20: {
+    capabilities: ["i2c_sda"],
     unsupportedCapabilities: ["i2c_scl"],
-    activeCapability: "uart_tx",
+    activeCapability: "i2c_sda",
   },
-}}
-```
-
-This emits `supports_uart_tx: true`, `supports_i2c_scl: false`, and
-`is_configured_for_uart_tx: true`. The unused unsupported function produces no
-peripheral compatibility error.
-
-## Unknown case: Incomplete capability information
-
-```tsx
-pinAttributes={{
-  GPIO0: {
-    capabilities: ["uart_tx"],
+  GPIO21: {
+    capabilities: ["i2c_scl"],
+    unsupportedCapabilities: ["i2c_sda"],
     activeCapability: "i2c_scl",
   },
 }}
 ```
 
-`supports_i2c_scl` remains absent. This produces no peripheral compatibility
-error, but does not establish that the assignment is supported. An omitted
-function in `capabilities` is not an explicit declaration of non-support.
+Both assignments pass the peripheral capability check. If GPIO20 is instead
+configured with `activeCapability: "i2c_scl"`, core emits these attributes on its
+`source_port`:
 
-## Motivation
+```json
+{
+  "supports_i2c_sda": true,
+  "supports_i2c_scl": false,
+  "is_configured_for_i2c_scl": true
+}
+```
 
-The current [props definition](https://github.com/tscircuit/props/blob/main/lib/common/pinAttributeMap.ts)
-can declare supported and active functions, but cannot declare unsupported ones.
-The [core conversion](https://github.com/tscircuit/core/blob/main/lib/components/primitive-components/Port/apply-pin-attributes-to-source-port.ts)
-only writes `true` for listed capabilities. Consequently, a checker that requires
-explicit `false` support attributes can validate annotated Circuit JSON while
-missing the same mistake in a normal TSX design.
+The checker then reports a `source_component_misconfigured_error`:
 
-Component definitions, including those in `common`, should supply capabilities
-verified against the component's documentation. The board design declares the
-function actually used with `activeCapability` or `activeCapabilities`. Selecting
-a function must not overwrite an explicit unsupported declaration or imply that
-the hardware supports it. A component wrapper must preserve its capability
-metadata when combining it with the board's active-function attributes.
+```text
+U1 pin GPIO20 is configured for unsupported peripheral functions: I2C SCL
+```
 
-## Proposed API and semantics
+The error includes the component and pin references. Multiple unsupported active
+functions on one pin are grouped into one error.
 
-Add `unsupportedCapabilities?: Array<PinCapability>` to `PinAttributeMap` and an
-optional array of the existing `pinCapability` enum to its Zod schema. Reuse all
-eight existing functions: `i2c_sda`, `i2c_scl`, `spi_cs`, `spi_sck`, `spi_mosi`,
-`spi_miso`, `uart_tx`, and `uart_rx`.
+## Behavior
 
-For each function, core preserves three distinct support states:
+- `capabilities` writes `true` to the corresponding support attributes.
+- `unsupportedCapabilities` writes `false`.
+- A function in neither list stays unknown and produces no compatibility error.
+  Existing capability lists do not become exhaustive.
+- A function in both support lists is invalid metadata and must be rejected.
+- `activeCapability` and `activeCapabilities` keep their existing behavior.
+  Selecting an unsupported function must reach the checker so it can report the
+  circuit error.
 
-| Declaration | Circuit JSON support attribute |
-| --- | --- |
-| Listed only in `capabilities` | `true` |
-| Listed only in `unsupportedCapabilities` | `false` |
-| Listed in neither list | Absent (unknown) |
-| Listed in both lists | Invalid capability declaration |
+The board must declare the active function. Naming a net `I2C_SCL` alone does not
+activate this check. Controller pairing, PWM, ADC, and software or PIO emulation
+are outside this proposal.
 
-An omitted or empty list declares nothing. Duplicate entries within a list have
-no additional effect. Props validation must reject a function appearing in both
-support lists, identifying the conflicting function; core must not silently
-choose whichever declaration was applied last. Apply this rule to the effective
-attributes after component defaults and user attributes have been combined.
+## Implementation
 
-An unsupported function appearing in an active list is intentionally accepted by
-props: it is a circuit configuration error for the checker to report, rather than
-contradictory capability metadata.
+1. Add the optional field and support-list validation to `props`, then release it.
+2. Update `core` to consume those props and write explicit `false` support
+   attributes. Component wrappers must preserve their capability metadata when
+   board attributes select active functions.
+3. Release the checker from checks PR #266 and adopt it in core and the tscircuit
+   dependencies used by the CLI. Core already runs `runAllPinSpecificationChecks`,
+   and `tsci check pin_specification` already calls the aggregate checker.
 
-Keep the existing union of `activeCapability` and `activeCapabilities`, setting
-the corresponding `is_configured_for_*` attributes to `true`. The checker reports
-an error only when configuration is explicitly `true` and support is explicitly
-`false` on the same source port.
+Circuit JSON already has the optional support booleans and error type. No schema
+change or new CLI command is needed.
 
-## Implementation and release order
-
-1. **Props:** Add the optional field to the interface and schema, validate
-   contradictory support lists, test parsing and type compatibility, then release.
-2. **Checks:** Merge and release the checker in checks PR #266. It was open when
-   this RFC was written; passing CI does not make it available in released packages.
-   This work can proceed independently of the props change.
-3. **Core:** Adopt the released props and checks versions. Extend the existing
-   typed capability conversion to write explicit `false` attributes and preserve
-   absent support. Add a TSX test through `renderUntilSettled()` that verifies both
-   source-port attributes and emitted diagnostics. Reuse the existing
-   `runAllPinSpecificationChecks` call in
-   [Board.ts](https://github.com/tscircuit/core/blob/main/lib/components/normal-components/Board.ts).
-4. **Component definitions / common:** Add verified capability metadata where it
-   is known, and preserve it when board designs supply active functions. Test a
-   component wrapper with an unsupported active function. Do not guess capability
-   information or require a complete component-library migration for the release.
-5. **Tscircuit / CLI:** Adopt released packages through their existing dependency
-   paths and verify the resolved core, props, and checks versions. Exercise the
-   same TSX through `tsci check pin_specification`. The existing
-   [CLI command](https://github.com/tscircuit/cli/blob/main/cli/check/pin-specification/register.ts)
-   already calls the aggregate checker; no new command is required.
-
-No Circuit JSON schema change is required: the optional support and configuration
-booleans already exist in
-[SourcePinAttributes](https://github.com/tscircuit/circuit-json/blob/main/src/source/properties/source_pin_attributes.ts),
-and the diagnostic uses the existing
-[source_component_misconfigured_error](https://github.com/tscircuit/circuit-json/blob/main/src/source/source_component_misconfigured_error.ts).
-Consumers must use released versions containing these contracts.
-
-## Acceptance tests
-
-- Props accepts omitted, empty, and valid unsupported lists; rejects unknown
-  functions and overlapping support lists; and still accepts an unsupported
-  function selected as active.
-- Core verifies `true`, `false`, and absent support for all eight functions.
-  Existing positive-only declarations retain their output.
-- A normal TSX render of the bad case emits exactly one peripheral compatibility
-  error with the correct component and port references. Supported active,
-  unknown active, and unsupported inactive cases emit none of these errors.
-- Both active-function properties work together, duplicate entries do not
-  duplicate errors, and multiple unsupported active functions are grouped per pin.
-- Component wrappers preserve explicit unsupported metadata when adding active
-  functions, and reject contradictory support metadata after composition.
-- The CLI reports the unsupported assignment from TSX using released dependencies,
-  without manually editing Circuit JSON.
-
-## Alternatives and scope
-
-Treating `capabilities` as exhaustive would reinterpret incomplete existing
-metadata and create errors for unknown functions. A boolean capability map could
-represent all three states, but would introduce a second shape for the existing
-positive capability API. An optional negative list extends that API directly.
-
-This proposal does not infer peripheral functions from pin or net names, assign
-pins automatically, validate controller pairing or multiplexing constraints, or
-model software-emulated protocols.
-
-The examples and diagnostic-oriented structure follow the existing
-[differential-pair RFC](./2026-08-05-differential-pairs-must-not-branch.md) and
-[decoupling-capacitor RFC](./2026-07-31-automatic-decoupling-capacitor-detection-and-enforcement.md).
+Test the RP2040 example through a normal TSX render: the valid assignment passes,
+GPIO20 configured as SCL produces an error, and missing support information stays
+unknown. Also cover all eight existing peripheral functions, conflicting support
+lists, and preservation of component attributes when a board selects a function.
