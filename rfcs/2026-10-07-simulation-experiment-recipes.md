@@ -106,6 +106,14 @@ source-port selectors. After rendering, each selector must resolve uniquely to
 an actual source port, the pair to one source trace, and that source trace to one
 PCB trace. Missing or ambiguous matches fail before output or native work.
 
+Compilation replaces selectors with canonical IDs in the execution declaration.
+Saved-plan validation must check declaration/binding agreement, including trace
+tuple order, and verify source-trace, endpoint-port and reference evidence against
+the saved Circuit JSON. The original selectors remain a checksummed informational
+authoring archive; a saved JSON runner does not replay core selectors. Change a
+selection by editing and rendering the TSX again. The checksum detects accidental
+archive changes; it does not authenticate provenance.
+
 `reference` accepts either exact `{copper_id,net_id}` values or a uniquely matched
 `{net_name,layer:"bottom"}` pour. A copper layer in the stackup is not a continuous
 plane. The exporter must consume the real pour geometry and reject unsupported
@@ -152,11 +160,19 @@ explicit Bun/Node-host `renderExperiments` collects declarations during normal
 core rendering, disables analog simulation for that compilation, then resolves
 bindings and produces real Circuit JSON plus a package-local sidecar.
 
+Normal React keys, including tags produced by `.map`, must work. The collector
+removes only React's reserved-key warning descriptor before strict JSON validation;
+user getters, setters and callbacks remain invalid.
+
 The sidecar is versioned JSON. It retains recipe identity, original selectors,
 resolved IDs, exact rendered Circuit JSON/hash, original/effective stackup and
 model assumptions, exact case setup, port mapping, repetition index and expected
 frequency-by-port workload. Saved plans are revalidated before execution. No new
 Circuit JSON `simulation_experiment` variant is proposed here.
+
+The corrected prototype uses sidecar version 2 for canonical declarations and
+binding evidence. Earlier version 1 plans require recompilation; historical native
+evidence remains unchanged rather than being rewritten as a new-version run.
 
 `runExperiments` requires explicit `mode:"export"` or `mode:"native"`. Export
 writes inputs only. Native execution requires explicit installed runtime paths,
@@ -192,10 +208,12 @@ core's intrinsic-element catalogue or the SPICE experiment schema.
 
 Public prior work includes the [merged Gmsh/Palace channel and eye pipeline](https://github.com/tscircuit/circuit-json-crosstalk-simulation/pull/3)
 and the [draft physical stackup schema](https://github.com/tscircuit/circuit-json/pull/871).
-The new tag/planner/runner prototype remains local and unpublished. Locally, 25
-unit/export tests, type checks and a four-case export passed. One separate real
-integration case at 1 GHz completed four independent excitations. This verifies
-the API-to-solver path, not SI accuracy or general-board support.
+The new tag/planner/runner prototype remains local and unpublished. Locally, 30
+unit/export tests, type checks and a four-case export passed. The saved-binding
+and keyed-tag corrections were tested without new native work. One earlier
+separate real integration case at 1 GHz completed four independent excitations.
+This verifies the earlier API-to-solver path, not SI accuracy or general-board
+support or a native run of the corrected planner.
 
 The prototype supports only a single two-layer board with two straight top-layer
 traces, covered rectangular endpoint pads and one actual rectangular bottom
