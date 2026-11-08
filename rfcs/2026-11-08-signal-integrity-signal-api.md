@@ -171,7 +171,7 @@ One block is one SI test: one coupled set of signals and one simulation run.
 
 | Prop | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `name` | `string` | required | Name of the test; unique per board. |
+| `name` | `string` | optional | Names the test in results. Required only when a board has more than one block. |
 | `bitRate` | `string \| number` | required | Default bit rate for signals. A number is in bit/s. |
 | `duration` | `string \| number` | see below | Simulated time. A number is in seconds. |
 | `corner` | `"typ" \| "min" \| "max"` | `"typ"` | IBIS corner used for every buffer in this test. |
@@ -209,7 +209,7 @@ may name the same pins.
 | `receiver` | `Endpoint \| Endpoint[]` | required | Pin(s) where the signal is measured. An array means several receivers (multi-drop). |
 | `bitRate` | `string \| number` | block `bitRate` | Overrides the block bit rate for this signal. |
 | `pattern` | `"prbs7" \| "prbs15" \| "prbs31" \| "clock" \| string` | `"prbs7"` | Bits to send. Any other string is a literal bit string such as `"0011010"`, repeated. |
-| `seed` | `number` | `hash(blockName, signalName)` | PRBS seed. Each signal gets a different, stable default, so neighbours are not correlated. |
+| `seed` | `number` | `hash(signalName)` | PRBS seed. Each signal gets a different, stable default, so neighbours are not correlated. The block name is not used, so the same signal sends the same bits in every block. |
 | `offset` | `string \| number` | `"0UI"` | Delay of this signal's first edge. Accepts `UI` or time units. |
 | `quiet` | `"low" \| "high" \| "off"` | not quiet | Holds the driver steady instead of sending `pattern` (below). |
 | `probe` | `"local" \| "global"` | `"local"` | Ground reference for single-ended probes (below). |
@@ -361,7 +361,7 @@ Source records, produced at render:
 interface SimulationSignalIntegrity {
   type: "simulation_signal_integrity"
   simulation_signal_integrity_id: string
-  name: string
+  name?: string
   bit_rate_bps: number
   duration_s: number
   corner: "typ" | "min" | "max"
@@ -421,6 +421,7 @@ Circuit JSON.
 | Path not routed and `unrouted="error"` | `Signal "DATA" is not routed between .TX > .Y and .RX > .A.` |
 | No stackup | `<signalintegrity> needs a stackup: set fabricatorPreset or define one.` |
 | Unmodelled part on the path | `.D5 is on signal "DATA" and has no SPICE or IBIS model.` |
+| Two or more blocks and one has no `name` | `This board has 3 <signalintegrity> blocks; give each a name.` |
 | Bare `quiet` | `quiet needs a level: "low", "high" or "off".` |
 | `strobe` names an unknown signal | `Signal "DQ0" strobe "DQS" is not a signal in block "WRITE".` |
 | `setup`/`hold` without `strobe` | `mask.setup and mask.hold need a strobe.` |
