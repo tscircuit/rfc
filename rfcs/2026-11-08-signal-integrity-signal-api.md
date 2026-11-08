@@ -177,7 +177,7 @@ One block is one SI test: one coupled set of signals and one simulation run.
 | `corner` | `"typ" \| "min" \| "max"` | `"typ"` | IBIS corner used for every buffer in this test. |
 | `unlistedNets` | `"passive"` | `"passive"` | How copper not named by a `<signal>` is treated (below). |
 | `unrouted` | `"error" \| "ideal"` | `"error"` | What to do when a signal's path is not fully routed. |
-| `pdn` | `"extracted" \| "ideal"` | `"extracted"` | Power and ground copper simulated from geometry, or treated as ideal. |
+| `pdn` | `"ideal" \| "extracted"` | `"ideal"` | `"ideal"`: chip power and ground pins see perfect rails. `"extracted"` (power and ground copper simulated from geometry) is **not implemented yet** and fails with an error. |
 | `supply` | `"board" \| "ibis"` | `"board"` | Supply voltages taken from the board's sources, or from the IBIS `[Voltage Range]`. |
 
 The default `duration` is one full period of the longest pattern in the
