@@ -47,7 +47,7 @@ export default () => (
 
     <copperpour connectsTo="net.GND" layer="bottom" />
 
-    <signalintegrity name="SI" bitRate="20Mbps">
+    <signalintegrity bitRate="20Mbps">
       <signal name="DATA" driver=".TX > .Y" receiver=".RX > .A" />
     </signalintegrity>
   </board>

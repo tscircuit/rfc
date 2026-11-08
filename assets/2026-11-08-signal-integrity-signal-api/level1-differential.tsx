@@ -51,7 +51,7 @@ export default () => (
     <differentialpair positiveConnection=".TX > .A" negativeConnection=".TX > .B" />
     <copperpour connectsTo="net.GND" layer="bottom" />
 
-    <signalintegrity name="SI" bitRate="250kbps">
+    <signalintegrity bitRate="250kbps">
       <signal
         name="BUS"
         driver={{ p: ".TX > .A", n: ".TX > .B" }}

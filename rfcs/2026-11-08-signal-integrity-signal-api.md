@@ -6,7 +6,7 @@ A signal integrity (SI) test is described by naming the signals to test. The
 rest is read from the board.
 
 ```tsx
-<signalintegrity name="SI" bitRate="20Mbps">
+<signalintegrity bitRate="20Mbps">
   <signal name="DATA" driver=".TX > .Y" receiver=".RX > .A" />
 </signalintegrity>
 ```
@@ -79,7 +79,7 @@ Complete boards for each level are in
 ### Level 1: one single-ended signal
 
 ```tsx
-<signalintegrity name="SI" bitRate="20Mbps">
+<signalintegrity bitRate="20Mbps">
   <signal name="DATA" driver=".TX > .Y" receiver=".RX > .A" />
 </signalintegrity>
 ```
@@ -87,7 +87,7 @@ Complete boards for each level are in
 ### Level 1: one differential signal
 
 ```tsx
-<signalintegrity name="SI" bitRate="250kbps">
+<signalintegrity bitRate="250kbps">
   <signal
     name="BUS"
     driver={{ p: ".TX > .A", n: ".TX > .B" }}
@@ -103,7 +103,7 @@ needed.
 ### Level 2: two signals
 
 ```tsx
-<signalintegrity name="SI" bitRate="20Mbps">
+<signalintegrity bitRate="20Mbps">
   <signal name="D0" driver=".TX > .D0" receiver=".RX > .D0" />
   <signal name="D1" driver=".TX > .D1" receiver=".RX > .D1" />
 </signalintegrity>
