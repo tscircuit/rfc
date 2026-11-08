@@ -1,16 +1,4 @@
 // LEVEL 1: one single-ended signal.
-//
-// In the lab: one driver chip sends bits down one copper trace to a receiver
-// chip. You put a scope probe on the receiver pin and look at the waveform and
-// the eye diagram.
-//
-// In code: the board below is a normal tscircuit board. Two things matter for
-// the test:
-//   1. the <ibismodel> on each chip: REQUIRED. It is the electrical model of the
-//      chip's pins. Without it there is nothing to simulate.
-//   2. the <signalintegrity> block at the bottom: the test itself, one line.
-//
-// Model file: TI sn74lvc1g04.ibs, see models/README.md.
 const ibisFile = {
   project_relative_path: "models/sn74lvc1g04.ibs",
   url: "./models/sn74lvc1g04.ibs",
@@ -18,7 +6,7 @@ const ibisFile = {
 }
 const lvc1g04 = {
   ibisModelAsset: ibisFile,
-  ibisComponentName: "LVC1G04_DCK",
+  ibisComponentName: "LVC1G04_DBV",
   ibisPinNameToPortLabel: { "2": "A", "3": "GND", "4": "Y", "5": "VCC" },
   ibisPinNameToModelName: { "2": "LVC1G04_IN_33", "4": "LVC1G04_OUT_33" },
   ibisPinNameToReferencePortLabels: {
@@ -30,13 +18,12 @@ const pins = { pin1: "NC", pin2: "A", pin3: "GND", pin4: "Y", pin5: "VCC" }
 
 export default () => (
   <board width="40mm" height="20mm" layers={2} fabricatorPreset="jlcpcb_standard">
-    <chip name="TX" manufacturerPartNumber="SN74LVC1G04DCK" footprint="sot23_5" pcbX={-15} pinLabels={pins} />
-    <chip name="RX" manufacturerPartNumber="SN74LVC1G04DCK" footprint="sot23_5" pcbX={15} pinLabels={pins} />
+    <chip name="TX" manufacturerPartNumber="SN74LVC1G04DBV" footprint="sot23_5" pcbX={-15} pinLabels={pins} />
+    <chip name="RX" manufacturerPartNumber="SN74LVC1G04DBV" footprint="sot23_5" pcbX={15} pinLabels={pins} />
 
     <ibismodel componentRef=".TX" {...lvc1g04} />
     <ibismodel componentRef=".RX" {...lvc1g04} />
 
-    <voltagesource name="V3V3" voltage="3.3V" connections={{ pos: "net.VCC", neg: "net.GND" }} />
     <trace from=".TX > .VCC" to="net.VCC" />
     <trace from=".RX > .VCC" to="net.VCC" />
     <trace from=".TX > .GND" to="net.GND" />
