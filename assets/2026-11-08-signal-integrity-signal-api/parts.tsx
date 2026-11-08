@@ -38,7 +38,6 @@ export const Inverter = (props: { name: string; pcbX: number; pcbY?: number }) =
         "2": { pullup: "VCC", pulldown: "GND", powerClamp: "VCC", groundClamp: "GND" },
         "4": { pullup: "VCC", pulldown: "GND", powerClamp: "VCC", groundClamp: "GND" },
       }}
-      includePackageParasitics
     />
     <trace from={`.${props.name} > .VCC`} to="net.VCC" />
     <trace from={`.${props.name} > .GND`} to="net.GND" />

@@ -456,6 +456,13 @@ rewritten using the levels above.
 set by `corner` on `<signalintegrity>`, so the same board can be run at all
 three corners.
 
+Its `includePackageParasitics` prop is also removed. The package R, L and C
+from the IBIS `[Package]`, `[Pin]` and package model sections are always
+simulated, because a real pin always has its package between the die and the
+board. The implementation supports every IBIS package form, including R/L/C
+on power and ground pins and coupled package matrices. If a separate package
+model is supplied, the IBIS package values are not added a second time.
+
 This RFC replaces the SI-specific parts of the open RFCs on IBIS stimuli and
 eye diagrams (#25) and on PCB channel experiments (#23) with one element
 pair. General transient simulation with `<voltageprobe>` is unchanged.

@@ -25,7 +25,6 @@ const sn65hvd72 = {
     "6": { pullup: "VCC", pulldown: "GND", powerClamp: "VCC", groundClamp: "GND" },
     "7": { pullup: "VCC", pulldown: "GND", powerClamp: "VCC", groundClamp: "GND" },
   },
-  includePackageParasitics: true,
 }
 const pins = { pin1: "R", pin2: "RE", pin3: "DE", pin4: "D", pin5: "GND", pin6: "A", pin7: "B", pin8: "VCC" }
 

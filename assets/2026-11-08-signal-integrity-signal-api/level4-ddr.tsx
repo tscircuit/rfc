@@ -46,7 +46,6 @@ const ddrModel = (file: string, component: string, dqModel: string, dqsModel: st
     signalPinNumbers.map((n) => [n, Number(n) <= 8 ? dqModel : dqsModel]),
   ),
   ibisPinNameToReferencePortLabels: Object.fromEntries(signalPinNumbers.map((n) => [n, refs])),
-  includePackageParasitics: true,
 })
 
 export default () => (
