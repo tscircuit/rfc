@@ -72,9 +72,9 @@ A differential pair counts as **one** signal.
 | 1 | one `<signal>` with `{ p, n }` endpoints | differential eye, common mode |
 | 2 | two `<signal>`s | the signals now couple: each eye includes crosstalk |
 | 3 | three `<signal>`s | full coupling; add `quiet` to one to measure crosstalk alone |
-| 4 | `strobe` and `mask` | generic setup/hold margins; no DDR compliance claim |
+| 4 | DDR3 write byte lane, `strobe` and `mask` | real controller/memory buffers; generic timing, no JEDEC compliance |
 
-Complete boards for each level are in
+Board examples for each level are in
 [`assets/2026-11-08-signal-integrity-signal-api/`](../assets/2026-11-08-signal-integrity-signal-api/).
 
 ### Level 1: one single-ended signal
@@ -139,35 +139,48 @@ NEXT and FEXT.
 
 The two blocks are independent runs over the same board.
 
-### Level 4: sampling on a strobe
+### Level 4: DDR3 write byte lane
 
 ```tsx
-<signalintegrity name="FORWARD" bitRate="250kbps">
+<signalintegrity name="WRITE" bitRate="800Mbps" corner="typ">
   <signal
-    name="STROBE"
-    driver={{ p: ".TX > .A", n: ".TX > .B" }}
-    receiver={{ p: ".RX > .A", n: ".RX > .B" }}
+    name="DQS"
+    driver={{
+      pin: { p: ".CPU > .DDR_DQS0", n: ".CPU > .DDR_DQSN0" },
+      model: { p: "Model_579", n: "Model_771" },
+    }}
+    receiver={{
+      pin: { p: ".DRAM > .DQSL", n: ".DRAM > .DQSL_N" },
+      model: { p: "ODT_off", n: "ODT_off" },
+    }}
     pattern="clock"
     offset="0.5UI"
   />
   <signal
-    name="DATA"
-    driver=".TX > .R"
-    receiver=".RX > .D"
-    strobe="STROBE"
-    mask={{ setup: "100ns", hold: "100ns" }}
+    name="DQ0"
+    driver={{ pin: ".CPU > .DDR_D0", model: "Model_257" }}
+    receiver={{ pin: ".DRAM > .DQL0", model: "ODT_off" }}
+    strobe="DQS"
+    mask={{ setup: "10ps", hold: "45ps" }}
   />
 </signalintegrity>
 ```
 
-The asset uses real SN65HVD72 buffers to illustrate generic strobe timing.
-The half-UI offset puts transmitted strobe edges between data boundaries.
-The timing limits are illustrative, not device requirements. The eye folds
-on received strobe crossings. A reverse test is a separate block.
+[`level4-ddr3-write.tsx`](../assets/2026-11-08-signal-integrity-signal-api/level4-ddr3-write.tsx)
+connects AM335x `am335x_zcz` to Winbond `W631GG6MB-12`: DQ0–DQ7 and
+DQS/DQS#. Both use 1.5 V at `typ`. The half-UI DQS offset centre-aligns the
+transmitted write strobe with data. Each data eye folds on its received DQS.
 
-This measures setup and hold with one high/low threshold pair. It does not
-implement DDR's separate AC setup and DC hold thresholds, preambles, training
-or JEDEC compliance, and does not replace a DDR device assessment.
+The 10 ps setup / 45 ps hold values are the DDR3-1600 base values in
+[Winbond's datasheet, A03, Table 54, p. 158](https://media.digikey.com/pdf/Data%20Sheets/Winbond%20PDFs/W631GG6MB_A03.pdf#page=158).
+They are teaching limits here: the generic mask uses one DC threshold pair,
+without slew derating or DDR's separate AC setup and DC hold checks.
+
+This is a write-direction illustration, not JEDEC compliance or a complete
+memory-system design. It currently stops with the documented error:
+`.CPU: coupled [Package Model] not implemented yet; scalar fallback is forbidden.`
+AM335x's package must be supported before it can run. A read test would need
+a separate block and receive-capable controller models.
 
 ## `<signalintegrity>`
 
@@ -195,18 +208,27 @@ multiple in time of all switching pattern periods, including different bit
 rates. PRBS periods are `(2^n - 1) * UI_i`; literal periods are their bit count
 times UI. This covers the joint cycle, not just the longest pattern.
 
-Set `a_i = offset_i + ceil((S - offset_i) / UI_i) * UI_i`. The default duration
-is `max(a_i + T + UI_i)`. For a fixed-grid eye, start one 2-UI window at each
-bit boundary in `[a_i, a_i + T)`: exactly `T / UI_i` complete windows. A single
-zero-offset clock therefore records 19 UI and supplies two complete windows.
-The eye excludes settling and requires observed high and low bits.
+Set `a_i = offset_i + ceil((S - offset_i) / UI_i) * UI_i`. The pipeline
+computes the automatic minimum `max(a_i + T + UI_i)`. For a fixed-grid eye,
+start one 2-UI window at each bit boundary in `[a_i, a_i + T)`: exactly
+`T / UI_i` complete windows. A zero-offset clock therefore records 19 UI
+and supplies two complete windows.
+The eye excludes settling and requires windows for transmitted high and low
+bits.
 
-A strobe eye uses received crossings, with a full data UI recorded on either
-side. Extend the automatic duration for propagation delay until at least the
-same window count fits. Missing crossings or sampled logic levels are errors,
-not an eye. An explicit duration must satisfy these coverage rules too. A
-quiet-only block records 32 times the largest UI and measures after
-`16 * max(UI_i)`. In a mixed block, quiet peaks use `[S, duration]`.
+A strobe eye records a full data UI on either side of its sampling instant
+(received crossing plus data offset). The pipeline extends automatic duration
+for offsets, propagation and complete windows until at least the same window
+count fits. Missing crossings or either transmitted bit class are errors.
+A quiet-only block automatically records 32 times the largest UI and measures
+after `16 * max(UI_i)`. Quiet peaks in mixed blocks use `[S, duration]`.
+
+Absent `duration` leaves source `duration_s` absent. Core never fills in an
+automatic value. Present `duration_s` is the user's explicit bound; the pipeline
+must not extend it. Insufficient complete-window coverage fails with
+`Signal "DATA": explicit duration is too short for complete eye windows after settling.`
+The signal name varies. The final recording duration is reported as
+`result.blocks[].duration_s`; source records retain the user's choice.
 
 ### Unlisted copper
 
@@ -373,13 +395,19 @@ type Mask = {
 }
 ```
 
-- For a single-ended receiver, `"ibis"` uses applicable `[Receiver
-  Thresholds]`, otherwise the model's `Vinh`/`Vinl`.
-- For a differential receiver, use `[Diff_pin] vdiff`: `vih = +vdiff` and
-  `vil = -vdiff`. SN65HVD72 uses **+0.2 V / -0.2 V**, never its legs' 2.0 V /
-  0.8 V TTL limits. Applicable differential receiver thresholds take
-  precedence. Missing usable thresholds are an error.
-- An object overrides supplied values; omitted values follow these rules.
+- Single-ended `"ibis"` uses `[Receiver Thresholds]` when Vth and DC offsets
+  are present: `vih = Vth + Vinh_dc`, `vil = Vth + Vinl_dc` (signed offsets).
+  Use `Vth` at `typ`, `Vth_min` at `min`, and `Vth_max` at `max`. Otherwise
+  use the model's `Vinh`/`Vinl`, which are DC thresholds in IBIS. AC thresholds
+  are not used.
+- Differential `"ibis"` uses `[Diff_pin] vdiff`, overridden by
+  `[Receiver Thresholds] Vdiff_dc` when present: `vih = +vdiff`, `vil = -vdiff`.
+  SN65HVD72 therefore uses **+0.2 V / -0.2 V**, never its legs' TTL limits.
+- Use the test corner for corner-valued fields; a scalar applies to all
+  corners. Missing usable thresholds at that corner are an error.
+  `Threshold_sensitivity` is ignored with `pdn="ideal"`: rails are constant.
+- `mask={{ vih, vil }}` overrides the threshold pair. An object overrides
+  supplied values; omitted values follow these rules.
 - `setup` and `hold` apply only with `strobe`. They are not in IBIS and come
   from the receiver's datasheet.
 
@@ -396,9 +424,10 @@ back to another chip's sole receiver.
 
 Sample both rising and falling received crossings at `(vih + vil) / 2`
 (zero for a symmetric differential mask). Missing crossings are an error.
-Setup/hold use the continuous data-valid interval around each crossing,
-minus the requested setup/hold time; negative margins fail. This is a generic
-single-threshold measurement, not native DDR validation.
+For strobed data, add its `offset` to the received crossing to get the
+sampling instant. Setup/hold use the continuous data-valid interval around
+that instant, minus the requested setup/hold time; negative margins fail.
+This is a generic single-threshold measurement, not native DDR validation.
 
 ## Board requirements
 
@@ -476,7 +505,7 @@ interface SimulationSignalIntegrity {
   simulation_signal_integrity_id: string
   name?: string
   bit_rate_bps: number
-  duration_s: number
+  duration_s?: number
   corner: "typ" | "min" | "max"
   unlisted_nets: "passive"
   unrouted: "error" | "ideal"
@@ -585,8 +614,26 @@ interface SimulationSignalIntegrityRlgc {
 Waveforms use parallel, nonempty arrays of equal length: strictly increasing
 recording times in seconds and voltages in volts. Each eye has at least one
 complete folded trace in the same shape; its times run from 0 to 2 UI.
-Eye height and width are nonnegative; mask margin may be negative.
-Every numeric result must be finite.
+Every numeric result must be finite. Eye width is nonnegative. Eye height
+and mask margin may be negative. Waveforms span `0..result.blocks[].duration_s`.
+
+Eye measurements use the transmitted bit, never a received-voltage decision.
+For fixed-grid folding, sample the first bit's UI centre (`0.5 UI` in the
+2-UI trace). For strobe folding, centre the trace at the received crossing
+plus data offset (`1 UI` in the trace). Match received strobe edges in order
+to transmitted edges of the same polarity, starting before the settling gate;
+classify by the transmitted data bit at that transmitted edge plus data offset.
+There is no phase optimization. Use linear interpolation between waveform
+samples, including threshold crossings.
+
+| Field | Definition over all complete folded traces at that receiver |
+| --- | --- |
+| `eye_height_v` | minimum '1' voltage minus maximum '0' voltage at the sampling instant |
+| `eye_width_s` | width of the maximal continuous interval containing that instant where every '1' trace stays ≥ `vih` and every '0' trace stays ≤ `vil`; zero if either condition fails at the instant; bounded by the folded domain |
+| `mask_margin_v` | minimum of `v - vih` for all '1' samples and `vil - v` for all '0' samples at that instant |
+
+The bit class stays fixed while finding the interval. Both classes must be
+present. Differential measurements use P−N for every voltage and threshold.
 
 Emit one far waveform and eye per switching receiver. For a quiet signal,
 emit one waveform and crosstalk record **per receiver**, plus one near
@@ -603,8 +650,9 @@ disturbed waveform's mean. A floating off victim without a unique idle
 operating point is an error.
 
 Strobe margins are per data receiver. `edges` contains both crossing
-polarities in time order, with absolute recording times in seconds. Worst
-margins are the minima of their nonempty edge arrays; negative values fail.
+polarities in time order; `time_s` is the absolute sampling instant (received
+crossing plus data offset), in seconds. Worst margins are the minima of their
+nonempty edge arrays; negative values fail.
 
 RLGC has nonempty `conductors` and `matrices` arrays. Each matrix is
 `conductors.length` square at its positive `frequency_hz`;
@@ -614,6 +662,19 @@ and siemens, not per metre. A pair contributes distinct P and N entries with
 the same logical signal ID. A single-ended signal contributes `single`;
 unlisted copper uses its source trace ID. Conductor identities are unique;
 internal mesh partitions and junctions must not duplicate a logical leg.
+
+R and L are loop matrices, one loop per conductor against the eliminated
+return: `R = Aᵀ R_primitive A`, `L = Aᵀ L_primitive A`, with `A = [I; -ones]`.
+The reference/return is not a row. C and G are Maxwell (nodal) matrices:
+diagonal = total capacitance/conductance to all others, including the return;
+off-diagonal = negative mutual value. Thus `ΔV = (R + jωL) I` and
+`I_shunt = (G + jωC) V`, with V relative to the return. Lossless G is zero.
+
+At each frequency, align each spatial section to the public conductor order
+and sum its total R, L, C and G entries. An absent conductor contributes zero.
+Sum shunt halves once; do not divide by length or multiply already-total
+solver matrices by length. This aggregate reports extraction totals; the
+transient model retains the spatial sections and their junctions.
 
 None of the old channel, lane, profile or extraction records appear in
 public Circuit JSON.
@@ -644,11 +705,12 @@ public Circuit JSON.
 | Quiet strobe | `Signal "DQ0": strobe "DQS" must switch.` |
 | Missing or ambiguous physical strobe receiver | `Signal "DQ0": expected exactly one DQS receiver on .DRAM.` |
 | Missing differential mask thresholds | `.RX > .A/.B has no usable differential thresholds; specify mask.vih and mask.vil.` |
-| Incomplete measurement coverage | `Signal "DATA": recording needs complete eye windows and observed high and low bits after settling.` |
+| Explicit duration too short | `Signal "DATA": explicit duration is too short for complete eye windows after settling.` |
+| Incomplete measurement coverage | `Signal "DATA": recording needs complete eye windows and transmitted high and low bits after settling.` |
 | No received strobe crossings | `Signal "DQ0": no received DQS crossings after settling.` |
 | `setup`/`hold` without `strobe` | `mask.setup and mask.hold need a strobe.` |
 | Extracted PDN | `pdn="extracted" is not implemented yet.` |
-| Coupled package matrices | `.U1: coupled package matrices are not implemented yet; scalar fallback is forbidden.` |
+| Coupled `[Package Model]` | `.CPU: coupled [Package Model] not implemented yet; scalar fallback is forbidden.` |
 | Branched routed graph | `Signal "BUS": branched routed graphs are not implemented yet.` |
 
 ## Removed API
@@ -703,11 +765,12 @@ pair. General transient simulation with `<voltageprobe>` is unchanged.
    `pcb_spice_channel` and the lane caps.
 3. **core:** add `signalintegrity` and `signal` to the element catalogue.
    At render they resolve selectors, compute topology, check the
-   diagnostics, and emit source records.
+   diagnostics, and emit source records. Omit automatic `duration_s`.
 4. **signal-integrity-pipeline:** Circuit JSON is the only electrical input.
    Model bytes and native solver execution are IO dependencies, not a second
    modeling configuration. Group and run blocks independently, preserve placed
-   models, extract routed copper, and lower stimulus and measurements privately.
+   models, compute automatic duration, extract routed copper, and lower stimulus
+   and measurements privately.
 5. **cli:** load referenced IBIS assets, provide the native solver adapter,
    call the pipeline with an options object, and print results per block.
 
@@ -735,22 +798,22 @@ text, args and outputFiles are string arrays, and exitCode is a number.
 The CLI calls `runPipeline({ circuitJson, ibisSources, runSolver })` and reads
 `result.simulationResultCircuitJson`, **not** the result object as an array.
 That array retains input records and replaces prior SI result records with
-validated results. `result.blocks` holds each block's ID, name, results and
-limitations; `result.files` maps artifact paths to text. These are exported
-pipeline types, shared with the CLI.
+validated results. `result.blocks` holds each block's ID, name, final
+`duration_s`, results and limitations; `result.files` maps artifact paths to
+text. These are exported pipeline types, shared with the CLI.
 
 ## Not implemented yet
 
 | Feature | Current boundary |
 | --- | --- |
 | `pdn="extracted"` | error; default is `"ideal"` with IBIS-derived rails |
-| Coupled package matrices | error; scalar package R/L/C is supported |
+| Coupled `[Package Model]` | error; blocks the AM335x DDR3 write example; scalar package R/L/C is supported |
 | Branched routed graphs, including routed multi-drop | error until graph extraction supports shared junctions, regardless of source-trace grouping |
 | Native DDR device validation | generic strobe timing only; no real DDR/JEDEC validation |
 
-The review also found discarded placed SPICE models, disabled-output crashes,
-incompatible result records, and a broken CLI call boundary in the sibling
-PRs. This RFC defines the required fixes; those PRs are updated separately.
+The sibling PRs still need the specified duration provenance, DC thresholds,
+fixed-phase eye metrics, RLGC basis, placed-model preservation, pin-state and
+CLI boundary fixes. They are updated separately.
 The current assets are contract examples, not verified native pipeline runs.
 Earlier native prototype runs do not establish that the five PRs work together.
 
