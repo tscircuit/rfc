@@ -31,3 +31,14 @@ It currently stops with
 These are proposed-contract examples, not verified native pipeline runs.
 The sibling PRs still need the contract fixes. Extracted PDN, coupled packages,
 branched routed graphs and native DDR validation remain unimplemented.
+
+Run the review's threshold, strobe and finite-return contract vectors with:
+
+```sh
+python3 assets/2026-11-08-signal-integrity-signal-api/check-review.py /path/to/ibis-corpus
+```
+
+The script reads the external Micron `gh/gh_micron_u48b.ibs`, Winbond
+`w631gg6mb_ibis.zip/W631GG6MB-12.ibs` and TI `sprm552/sprm552c.ibs` under
+`ibis-corpus/x/`. It executes no corpus content. These are mathematical
+contract checks, not updated pipeline or native solver results.

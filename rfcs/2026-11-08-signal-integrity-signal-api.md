@@ -395,21 +395,65 @@ type Mask = {
 }
 ```
 
-- Single-ended `"ibis"` uses `[Receiver Thresholds]` when Vth and DC offsets
-  are present: `vih = Vth + Vinh_dc`, `vil = Vth + Vinl_dc` (signed offsets).
-  Use `Vth` at `typ`, `Vth_min` at `min`, and `Vth_max` at `max`. Otherwise
-  use the model's `Vinh`/`Vinl`, which are DC thresholds in IBIS. AC thresholds
-  are not used.
+- Single-ended `"ibis"` starts with the selected model's DC `Vinh`/`Vinl`.
+  For each field, `[Model Spec]` overrides `[Model]`: select its `typ`, `min`
+  or `max` column at that operating corner. A `[Model]` scalar applies at
+  all corners. `[Model Spec]` `NA` in min/max means its typical value,
+  as specified by [IBIS 7.1, §6.1, pp. 64–65](https://ibis.org/ver7.1/ver7_1.pdf#page=65).
+  Missing required typical values are unavailable.
+- A usable `[Receiver Thresholds]` DC pair overrides that pair. At **every**
+  corner, use `H = Vth_max` and `L = Vth_min`; each missing optional extremum
+  uses `Vth`. These are extrema at **typical operating conditions**, not
+  operating corners. This chooses the conservative envelope where extrema
+  are supplied; it invents no spread where only nominal `Vth` is supplied.
+  With signed DC offsets, `vih = H + Δc + Vinh_dc` and
+  `vil = L + Δc + Vinl_dc`. AC offsets are not used.
+
+| Operating corner `c` | Reference supply `S(c)` | Correction `Δc` |
+| --- | --- | --- |
+| `typ` | `typ` value | `0` |
+| `min` | `min` value | `Threshold_sensitivity × (S(min) − S(typ))` |
+| `max` | `max` value | `Threshold_sensitivity × (S(max) − S(typ))` |
+
+`S` is the keyword named by `Reference_supply`: `Power_clamp_ref`,
+`Gnd_clamp_ref`, `Pullup_ref`, `Pulldown_ref` or `Ext_ref` selects the
+corresponding `[... Reference]` keyword. If that keyword is omitted, IBIS
+defaults Pullup/POWER Clamp to `[Voltage Range]` and Pulldown/GND Clamp to
+0 V; External Reference has no default (§6.1, pp. 78–80). An explicit `NA`
+supply value is unavailable for this conversion. A scalar supply applies at
+all corners. Apply the correction even with `pdn="ideal"`: a static corner rail
+can differ from the typical rail. See
+[IBIS 7.1, §6.1, `[Receiver Thresholds]`, pp. 71–73](https://ibis.org/ver7.1/ver7_1.pdf#page=71),
+especially “Vth at Minimum or Maximum Operating Conditions” on p. 73.
+
+Missing `Vth` or either DC offset makes this conversion unavailable.
+At `typ`, omitted sensitivity/reference needs no correction. At `min`/`max`,
+require sensitivity, its named reference, and numeric typical/selected supply
+values; do not assume zero sensitivity. A sensitivity without its required
+reference is unusable at any corner. If conversion is unavailable, use the
+complete DC `Vinh`/`Vinl` pair above. If that is unavailable too, require
+explicit `mask.vih`/`mask.vil`; never label a guessed pair `"ibis"`.
+
 - Differential `"ibis"` uses `[Diff_pin] vdiff`, overridden by
   `[Receiver Thresholds] Vdiff_dc` when present: `vih = +vdiff`, `vil = -vdiff`.
   SN65HVD72 therefore uses **+0.2 V / -0.2 V**, never its legs' TTL limits.
 - Use the test corner for corner-valued fields; a scalar applies to all
   corners. Missing usable thresholds at that corner are an error.
-  `Threshold_sensitivity` is ignored with `pdn="ideal"`: rails are constant.
 - `mask={{ vih, vil }}` overrides the threshold pair. An object overrides
   supplied values; omitted values follow these rules.
 - `setup` and `hold` apply only with `strobe`. They are not in IBIS and come
   from the receiver's datasheet.
+
+For Micron `DQFULL_533`, `Vth=0.900`, `L=0.882`, `H=0.918` V,
+DC offsets are ±0.125 V, sensitivity is 0.50, and `[Pullup Reference]`
+is 1.8/1.7/1.9 V. At `min`, `Δc=0.50×(1.7−1.8)=−0.050 V`, so
+`vih=0.993 V`, `vil=0.707 V`. A 0.740 V low fails. The full corner pairs
+(`vih`/`vil`, V) are `1.043/0.757`, `0.993/0.707`, `1.093/0.807`.
+Winbond `W631GG6MB-12` `ODT_off` has no `[Receiver Thresholds]` and uses
+0.9/0.6 V at all corners. AM335x receive `Model_1000` uses `[Model Spec]`:
+0.85/0.65, 0.8125/0.6125, 0.8875/0.6875 V. These real-file checks and the
+vectors below are executable with the
+[contract self-check](../assets/2026-11-08-signal-integrity-signal-api/check-review.py).
 
 ### `strobe`
 
@@ -425,8 +469,8 @@ back to another chip's sole receiver.
 Sample both rising and falling received crossings at `(vih + vil) / 2`
 (zero for a symmetric differential mask). Missing crossings are an error.
 For strobed data, add its `offset` to the received crossing to get the
-sampling instant. Setup/hold use the continuous data-valid interval around
-that instant, minus the requested setup/hold time; negative margins fail.
+sampling instant. Use the transmitted bit and signed interval rules below
+for setup/hold; an invalid sample or a negative margin fails.
 This is a generic single-threshold measurement, not native DDR validation.
 
 ## Board requirements
@@ -617,7 +661,8 @@ complete folded trace in the same shape; its times run from 0 to 2 UI.
 Every numeric result must be finite. Eye width is nonnegative. Eye height
 and mask margin may be negative. Waveforms span `0..result.blocks[].duration_s`.
 
-Eye measurements use the transmitted bit, never a received-voltage decision.
+Eye and strobe measurements use the transmitted bit, never a received-voltage
+decision.
 For fixed-grid folding, sample the first bit's UI centre (`0.5 UI` in the
 2-UI trace). For strobe folding, centre the trace at the received crossing
 plus data offset (`1 UI` in the trace). Match received strobe edges in order
@@ -651,8 +696,37 @@ operating point is an error.
 
 Strobe margins are per data receiver. `edges` contains both crossing
 polarities in time order; `time_s` is the absolute sampling instant (received
-crossing plus data offset), in seconds. Worst margins are the minima of their
-nonempty edge arrays; negative values fail.
+crossing plus data offset), in seconds. For each matched edge, the expected
+bit `b` is the transmitted data bit at the **transmitted** edge plus data
+offset. Keep `b` fixed even if received timing crosses a bit boundary.
+
+Within the recorded waveform, form maximal continuous intervals valid for
+`b`: `V ≥ vih` for '1', `V ≤ vil` for '0'. Differential V is P−N. Associate
+the interval `[a,b_end]` containing sample time `t`; if none contains it,
+choose the interval nearest to `t` (distance to its nearest boundary), with
+the earliest start breaking a tie. Never use the opposite bit's interval.
+With nonnegative requested times `s` and `h` (each defaults to zero):
+
+`setup_margin = t − a − s`; `hold_margin = b_end − t − h`.
+
+Thus a late valid interval gives negative setup; an early one gives negative
+hold. An invalid sample **always fails**, including `s=h=0`. If no interval
+for the expected bit exists anywhere in the recording of duration `D > 0`,
+emit finite margins `−D−s`, `−D−h` and fail. Do not discard that edge.
+Intervals with no observed crossing at a recording end are clipped to `0`
+or `D`; use only observed valid time, never extrapolate an infinite interval.
+Worst margins are the minima of the nonempty edge arrays.
+
+These vectors use `t=1 ns`, expected '1', `D=3 ns`, VIH/VIL=0.9/0.6 V.
+All times and margins in the table are ns.
+
+| Case | Expected-bit valid interval | `s` / `h` | Setup / hold margin | Result |
+| --- | --- | --- | --- | --- |
+| Valid | [0.50, 1.50] | .010 / .045 | +.490 / +.455 | pass |
+| Late; sample 0.75 V | [1.02, 2.08] | .010 / .045 | −.030 / +1.035 | fail |
+| Early | [0.20, 0.98] | .010 / .045 | +.790 / −.065 | fail |
+| Wrong bit; stable 0.10 V | none | .010 / .045 | −3.010 / −3.045 | fail |
+| Zero requirements; sample 0.75 V | [1.02, 2.08] | 0 / 0 | −.020 / +1.080 | fail |
 
 RLGC has nonempty `conductors` and `matrices` arrays. Each matrix is
 `conductors.length` square at its positive `frequency_hz`;
@@ -665,10 +739,32 @@ internal mesh partitions and junctions must not duplicate a logical leg.
 
 R and L are loop matrices, one loop per conductor against the eliminated
 return: `R = Aᵀ R_primitive A`, `L = Aᵀ L_primitive A`, with `A = [I; -ones]`.
-The reference/return is not a row. C and G are Maxwell (nodal) matrices:
+The finite return is the extraction section's physical reference copper,
+grouped as the last primitive conductor: ground pours and their connections
+for routed copper, or the joined return bars for a straightened section.
+It is not infinity or an additional public row.
+
+C uses a **floating finite return with total charge neutrality**. For the
+primitive Maxwell matrix `Cprim` referenced to infinity, let `s` index the
+signal conductors, `1` include signals and return, `u = Cprim·1`, and
+`d = 1ᵀ·Cprim·1 > 0`. Eliminate the common potential under `Q_total=0`:
+
+`C = Cprim[s,s] − u_s·u_sᵀ/d`.
+
+For signal voltages V relative to the return, the eliminated return potential
+relative to infinity is `−u_sᵀ·V/d`. This is not the grounded-return signal
+block `Cprim[s,s]`. For `Cprim=[[4,−1,−1],[−1,4,−1],[−1,−1,4]] pF`, the
+result is `[[10/3,−5/3],[−5/3,10/3]] pF`.
+
+Nonzero primitive G uses the analogous floating-return, zero-total-current
+reduction: `uG = Gprim·1`, `dG = 1ᵀ·Gprim·1`,
+`G = Gprim[s,s] − uG_s·uG_sᵀ/dG` for `dG > 0`. If `dG=0` and `uG=0`,
+the common potential is already arbitrary; use `Gprim[s,s]`. Other
+nonpositive-denominator cases are errors. Lossless G is zero.
+C and G retain Maxwell (nodal) signs:
 diagonal = total capacitance/conductance to all others, including the return;
 off-diagonal = negative mutual value. Thus `ΔV = (R + jωL) I` and
-`I_shunt = (G + jωC) V`, with V relative to the return. Lossless G is zero.
+`I_shunt = (G + jωC) V`, with V relative to the return.
 
 At each frequency, align each spatial section to the public conductor order
 and sum its total R, L, C and G entries. An absent conductor contributes zero.
@@ -704,6 +800,7 @@ public Circuit JSON.
 | Self-strobe or strobe cycle | `Signal "DQ0": strobe must name a different signal without a dependency cycle.` |
 | Quiet strobe | `Signal "DQ0": strobe "DQS" must switch.` |
 | Missing or ambiguous physical strobe receiver | `Signal "DQ0": expected exactly one DQS receiver on .DRAM.` |
+| Missing single-ended DC thresholds at the corner | `.RX > .A has no usable DC thresholds at min; specify mask.vih and mask.vil.` |
 | Missing differential mask thresholds | `.RX > .A/.B has no usable differential thresholds; specify mask.vih and mask.vil.` |
 | Explicit duration too short | `Signal "DATA": explicit duration is too short for complete eye windows after settling.` |
 | Incomplete measurement coverage | `Signal "DATA": recording needs complete eye windows and transmitted high and low bits after settling.` |
