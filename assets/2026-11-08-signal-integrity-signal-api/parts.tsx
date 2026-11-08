@@ -1,10 +1,19 @@
-// Chips and their IBIS models. This describes the parts, not the test.
+// Shared parts used by every example.
+//
+// This file describes the CHIPS, not the test. An <ibismodel> tells tscircuit
+// how a chip's pins behave electrically (the IBIS file is published by the
+// chip vendor). <signalintegrity> reads these models to know how strongly a
+// driver pin pushes and how a receiver pin loads the line. Nothing here says
+// which pin drives or what bits are sent; that is decided by each <signal>.
 const lvc = {
   ibisModelAsset: { project_relative_path: "models/sn74lvc8t245.ibs", url: "./models/sn74lvc8t245.ibs", mimetype: "text/plain" },
   ibisComponentName: "SN74LVC8T245",
   includePackageParasitics: true,
 }
 
+// An 8-bit buffer (SN74LVC8T245). Used as both TX (driver) and RX (receiver)
+// for the single-ended examples. Its D0–D2 pins are bidirectional I/O pins, so
+// the same chip can drive or receive; the <signal> chooses which.
 export const Octal = (props: { name: string; pcbX: number }) => (
   <>
     <chip
@@ -22,6 +31,8 @@ export const Octal = (props: { name: string; pcbX: number }) => (
   </>
 )
 
+// An RS-485 transceiver (THVD1450). Its A and B pins form a differential pair:
+// A carries the data and B carries the inverted copy.
 export const Rs485 = (props: { name: string; pcbX: number }) => (
   <>
     <chip
@@ -40,6 +51,8 @@ export const Rs485 = (props: { name: string; pcbX: number }) => (
   </>
 )
 
+// The 3.3 V bench supply. <signalintegrity supply="board"> (the default) takes
+// the supply voltage from this source, like powering the board in the lab.
 export const Supply = () => (
   <voltagesource name="V3V3" voltage="3.3V" connections={{ pos: "net.VCC", neg: "net.GND" }} />
 )
