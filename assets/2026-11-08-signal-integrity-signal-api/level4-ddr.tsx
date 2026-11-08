@@ -16,29 +16,83 @@
 //   - mask={{ setup, hold }} gives the timing limits from the DRAM datasheet.
 //     Results: setup and hold margin at every strobe edge, and the worst case.
 //
-// The controller and DRAM chips with their <ibismodel>s are defined like
-// parts.tsx; they are omitted here to keep the test readable.
-// The eight data lines of one byte lane.
+// PLACEHOLDER MODELS. Unlike Levels 1–3, this example is not tied to real
+// vendor files yet. A real board needs:
+//   - the memory controller vendor's IBIS file (an FPGA or SoC IBIS),
+//   - the DRAM vendor's IBIS file for the exact part and speed grade.
+// The file names, [Component] names, pin numbers and [Model] names below
+// (DQ_40_ODT40_1600, DQ_34_1600, …) are illustrative. Replace them with the
+// names from those files. DRAM IBIS files usually offer one [Model] per drive
+// strength and on-die termination (ODT) setting; picking one is the `model`
+// choice on each endpoint below.
+
 const dq = [0, 1, 2, 3, 4, 5, 6, 7]
 
-export const DdrTests = () => (
-  <>
+// Pin labels shared by both chips: DQ0–DQ7, the strobe pair, supply and ground.
+const ddrPins = {
+  ...Object.fromEntries(dq.map((i) => [`pin${i + 1}`, `DQ${i}`])),
+  pin9: "DQS_P",
+  pin10: "DQS_N",
+  pin11: "VDDQ",
+  pin12: "VSSQ",
+}
+// IBIS [Pin] -> port label, and the default [Model] for each signal pin.
+const ddrIbisPins = Object.fromEntries(Object.entries(ddrPins).map(([pin, label]) => [pin.slice(3), label]))
+const refs = { pullup: "VDDQ", pulldown: "VSSQ", powerClamp: "VDDQ", groundClamp: "VSSQ" }
+const signalPinNumbers = Object.keys(ddrIbisPins).filter((n) => !["11", "12"].includes(n))
+
+const ddrModel = (file: string, component: string, dqModel: string, dqsModel: string) => ({
+  ibisModelAsset: { project_relative_path: `models/${file}`, url: `./models/${file}`, mimetype: "text/plain" },
+  ibisComponentName: component,
+  ibisPinNameToPortLabel: ddrIbisPins,
+  ibisPinNameToModelName: Object.fromEntries(
+    signalPinNumbers.map((n) => [n, Number(n) <= 8 ? dqModel : dqsModel]),
+  ),
+  ibisPinNameToReferencePortLabels: Object.fromEntries(signalPinNumbers.map((n) => [n, refs])),
+  includePackageParasitics: true,
+})
+
+export default () => (
+  <board width="50mm" height="30mm" layers={4} fabricatorPreset="jlcpcb_standard">
+    {/* The two chips and their IBIS models (placeholders, see the header). */}
+    <chip name="MC" footprint="bga96" pcbX={-15} pinLabels={ddrPins} />
+    <chip name="DRAM" footprint="bga96" pcbX={15} pinLabels={ddrPins} />
+    <ibismodel componentRef=".MC" {...ddrModel("controller.ibs", "CONTROLLER", "MC_DQ_40", "MC_DQS_40")} />
+    <ibismodel componentRef=".DRAM" {...ddrModel("dram.ibs", "DRAM_X8", "DQ_34_1600", "DQS_34_1600")} />
+
+    {/* 1.5 V I/O supply (DDR3), and the chips' supply and ground pins. */}
+    <voltagesource name="VDDQ" voltage="1.5V" connections={{ pos: "net.VDDQ", neg: "net.GND" }} />
+    <trace from=".MC > .VDDQ" to="net.VDDQ" />
+    <trace from=".DRAM > .VDDQ" to="net.VDDQ" />
+    <trace from=".MC > .VSSQ" to="net.GND" />
+    <trace from=".DRAM > .VSSQ" to="net.GND" />
+
+    {/* The byte lane: eight data traces and one strobe pair, routed together. */}
+    {dq.map((i) => (
+      <trace key={i} from={`.MC > .DQ${i}`} to={`.DRAM > .DQ${i}`} />
+    ))}
+    <trace from=".MC > .DQS_P" to=".DRAM > .DQS_P" />
+    <trace from=".MC > .DQS_N" to=".DRAM > .DQS_N" />
+    <differentialpair positiveConnection=".MC > .DQS_P" negativeConnection=".MC > .DQS_N" />
+    <copperpour connectsTo="net.GND" layer="inner1" />
+
     {/* WRITE: the controller drives, the DRAM receives.
         On a write the controller places each strobe edge in the middle of each data bit. */}
     <signalintegrity name="WRITE" bitRate="1600Mbps">
       <signal
         name="DQS"
-        driver={{ p: ".MC > .DQS0_P", n: ".MC > .DQS0_N" }}
+        driver={{ p: ".MC > .DQS_P", n: ".MC > .DQS_N" }}
         receiver={{ p: ".DRAM > .DQS_P", n: ".DRAM > .DQS_N" }}
         pattern="clock"
       />
       {dq.map((i) => (
-        <signal key={i}
+        <signal
+          key={i}
           name={`DQ${i}`}
           driver={`.MC > .DQ${i}`}
           // model selects the DRAM's 40 Ω on-die termination (ODT): a resistor inside the
-          // chip that the controller switches on. The board alone cannot show which
-          // setting is active, so it is named here.
+          // chip that the controller switches on during writes. The board alone cannot
+          // show which setting is active, so it is named here.
           receiver={{ pin: `.DRAM > .DQ${i}`, model: "DQ_40_ODT40_1600" }}
           strobe="DQS"
           mask={{ setup: "75ps", hold: "100ps" }}
@@ -55,19 +109,21 @@ export const DdrTests = () => (
       <signal
         name="DQS"
         driver={{ p: ".DRAM > .DQS_P", n: ".DRAM > .DQS_N" }}
-        receiver={{ p: ".MC > .DQS0_P", n: ".MC > .DQS0_N" }}
+        receiver={{ p: ".MC > .DQS_P", n: ".MC > .DQS_N" }}
         pattern="clock"
       />
       {dq.map((i) => (
-        <signal key={i}
+        <signal
+          key={i}
           name={`DQ${i}`}
-          // The DRAM's 34 Ω output drive strength for this read.
-          driver={{ pin: `.DRAM > .DQ${i}`, model: "DQ_34_1600" }}
+          // No model override: the DRAM drives with the default model chosen in its
+          // <ibismodel> (DQ_34_1600, 34 Ω drive strength).
+          driver={`.DRAM > .DQ${i}`}
           receiver={`.MC > .DQ${i}`}
           strobe="DQS"
           mask={{ setup: "50ps", hold: "50ps" }}
         />
       ))}
     </signalintegrity>
-  </>
+  </board>
 )

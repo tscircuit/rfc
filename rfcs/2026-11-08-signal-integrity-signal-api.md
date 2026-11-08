@@ -316,6 +316,17 @@ The test is computed from information that must be on the board:
 If any of these is missing, rendering fails with a specific error. It does
 not fall back to guessed values.
 
+IBIS models are required, not optional. `<signalintegrity>` only names the
+test; the electrical behaviour of every driver and receiver comes from the
+chip's `<ibismodel>`. This RFC does not fetch models automatically from
+`manufacturerPartNumber`. A model library that does so would be a separate
+proposal, and would produce the same `<ibismodel>` records.
+
+The `<ibismodel>` also carries choices the copper cannot show: which
+`[Component]` in the file matches the package, and which `[Model]` each pin
+uses when the file has a `[Model Selector]` (for example the 3.3 V variant).
+A `<signal>` endpoint's `model` overrides that choice for one test.
+
 ## Numerical settings are not API
 
 The following are chosen by the implementation and are not props:
