@@ -1,6 +1,6 @@
 # IBIS models used by the examples
 
-`<signalintegrity>` cannot run without an IBIS model for every chip that drives
+`<signalintegrity.simulation>` cannot run without an IBIS model for every chip that drives
 or receives a signal. The IBIS file is what tells the simulator how strongly a
 pin drives, how fast its edges are, and how it loads the line.
 

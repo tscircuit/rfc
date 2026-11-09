@@ -57,7 +57,7 @@ export default () => (
       footprint={`bga96_grid9x16_p0.8mm_pad0.4mm_missing(${missing})_tlorigin_pinnumbering(ballcoords)`}
       pinLabels={dramPins}
     />
-    <ibismodel
+    <signalintegrity.ibismodel
       componentRef=".CPU"
       ibisModelAsset={{
         project_relative_path: "models/sprm552c.ibs",
@@ -75,7 +75,7 @@ export default () => (
         "VSS",
       )}
     />
-    <ibismodel
+    <signalintegrity.ibismodel
       componentRef=".DRAM"
       ibisModelAsset={{
         project_relative_path: "models/W631GG6MB-12.ibs",
@@ -108,14 +108,14 @@ export default () => (
     />
     <copperpour connectsTo="net.GND" layer="inner1" unbroken />
 
-    <signalintegrity name="WRITE" bitRate="800Mbps" corner="typ">
-      <signal
+    <signalintegrity.simulation name="WRITE" bitRate="800Mbps" corner="typical">
+      <signalintegrity.signal
         name="DQS"
-        driver={{
+        driverRef={{
           pin: { p: ".CPU > .DDR_DQS0", n: ".CPU > .DDR_DQSN0" },
           model: { p: "Model_579", n: "Model_771" },
         }}
-        receiver={{
+        receiverRef={{
           pin: { p: ".DRAM > .DQSL", n: ".DRAM > .DQSL_N" },
           model: { p: "ODT_off", n: "ODT_off" },
         }}
@@ -123,15 +123,15 @@ export default () => (
         offset="0.5UI"
       />
       {cpuDq.map((_, i) => (
-        <signal
+        <signalintegrity.signal
           key={String(i)}
           name={`DQ${i}`}
-          driver={{ pin: `.CPU > .DDR_D${i}`, model: "Model_257" }}
-          receiver={{ pin: `.DRAM > .DQL${i}`, model: "ODT_off" }}
-          strobe="DQS"
+          driverRef={{ pin: `.CPU > .DDR_D${i}`, model: "Model_257" }}
+          receiverRef={{ pin: `.DRAM > .DQL${i}`, model: "ODT_off" }}
+          strobeRef="DQS"
           mask={{ setup: "10ps", hold: "45ps" }}
         />
       ))}
-    </signalintegrity>
+    </signalintegrity.simulation>
   </board>
 )

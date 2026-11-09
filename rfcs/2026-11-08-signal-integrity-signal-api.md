@@ -1,4 +1,4 @@
-# Signal Integrity with `<signalintegrity>` and `<signal>`
+# Signal Integrity with `<signalintegrity.simulation>` and `<signalintegrity.signal>`
 
 ## Summary
 
@@ -6,12 +6,12 @@ A signal integrity (SI) test is described by naming the signals to test. The
 rest is read from the board.
 
 ```tsx
-<signalintegrity bitRate="20Mbps">
-  <signal name="DATA" driver=".TX > .Y" receiver=".RX > .A" />
-</signalintegrity>
+<signalintegrity.simulation bitRate="20Mbps">
+  <signalintegrity.signal name="DATA" driverRef=".TX > .Y" receiverRef=".RX > .A" />
+</signalintegrity.simulation>
 ```
 
-From one `<signal>`, tscircuit:
+From one `<signalintegrity.signal>`, tscircuit:
 
 - finds the copper the signal travels through and its ground return;
 - extracts the trace's coupled R, L, C and G;
@@ -20,7 +20,7 @@ From one `<signal>`, tscircuit:
 - folds the waveform into an eye diagram and checks it against the receiver's
   thresholds.
 
-Each added `<signal>` is coupled to the signals already in the block, so
+Each added `<signalintegrity.signal>` is coupled to the signals already in the block, so
 crosstalk is simulated automatically.
 
 This RFC **replaces** the hand-assembled SI API: `pcb_spice` transients with
@@ -63,16 +63,16 @@ The API should read the same way.
 
 ## Learning progression
 
-Start with one `<signal>`, then add coupling and strobe measurements.
+Start with one `<signalintegrity.signal>`, then add coupling and strobe measurements.
 A differential pair counts as **one** signal.
 
 | Level | TSX | What you learn |
 | --- | --- | --- |
-| 1 | one `<signal>` (single-ended) | delay, overshoot, ringing, eye opening |
-| 1 | one `<signal>` with `{ p, n }` endpoints | differential eye, common mode |
-| 2 | two `<signal>`s | the signals now couple: each eye includes crosstalk |
-| 3 | three `<signal>`s | full coupling; add `quiet` to one to measure crosstalk alone |
-| 4 | DDR3 write byte lane, `strobe` and `mask` | real controller/memory buffers; generic timing, no JEDEC compliance |
+| 1 | one `<signalintegrity.signal>` (single-ended) | delay, overshoot, ringing, eye opening |
+| 1 | one `<signalintegrity.signal>` with `{ p, n }` endpoints | differential eye, common mode |
+| 2 | two `<signalintegrity.signal>`s | the signals now couple: each eye includes crosstalk |
+| 3 | three `<signalintegrity.signal>`s | full coupling; add `quiet` to one to measure crosstalk alone |
+| 4 | DDR3 write byte lane, `strobeRef` and `mask` | real controller/memory buffers; generic timing, no JEDEC compliance |
 
 Board examples for each level are in
 [`assets/2026-11-08-signal-integrity-signal-api/`](../assets/2026-11-08-signal-integrity-signal-api/).
@@ -80,21 +80,21 @@ Board examples for each level are in
 ### Level 1: one single-ended signal
 
 ```tsx
-<signalintegrity bitRate="20Mbps">
-  <signal name="DATA" driver=".TX > .Y" receiver=".RX > .A" />
-</signalintegrity>
+<signalintegrity.simulation bitRate="20Mbps">
+  <signalintegrity.signal name="DATA" driverRef=".TX > .Y" receiverRef=".RX > .A" />
+</signalintegrity.simulation>
 ```
 
 ### Level 1: one differential signal
 
 ```tsx
-<signalintegrity bitRate="250kbps">
-  <signal
+<signalintegrity.simulation bitRate="250kbps">
+  <signalintegrity.signal
     name="BUS"
-    driver={{ p: ".TX > .A", n: ".TX > .B" }}
-    receiver={{ p: ".RX > .A", n: ".RX > .B" }}
+    driverRef={{ p: ".TX > .A", n: ".TX > .B" }}
+    receiverRef={{ p: ".RX > .A", n: ".RX > .B" }}
   />
-</signalintegrity>
+</signalintegrity.simulation>
 ```
 
 The 120 Ω resistor between A and B is a normal `<resistor>` on the board. It
@@ -104,10 +104,10 @@ needed.
 ### Level 2: two signals
 
 ```tsx
-<signalintegrity bitRate="20Mbps">
-  <signal name="D0" driver=".TX > .D0" receiver=".RX > .D0" />
-  <signal name="D1" driver=".TX > .D1" receiver=".RX > .D1" />
-</signalintegrity>
+<signalintegrity.simulation bitRate="20Mbps">
+  <signalintegrity.signal name="D0" driverRef=".TX > .D0" receiverRef=".RX > .D0" />
+  <signalintegrity.signal name="D1" driverRef=".TX > .D1" receiverRef=".RX > .D1" />
+</signalintegrity.simulation>
 ```
 
 Both signals are extracted together, so their mutual inductance and
@@ -118,18 +118,18 @@ other signal.
 
 ```tsx
 {/* All three switching: real traffic */}
-<signalintegrity name="TRAFFIC" bitRate="20Mbps">
-  <signal name="D0" driver=".TX > .D0" receiver=".RX > .D0" />
-  <signal name="D1" driver=".TX > .D1" receiver=".RX > .D1" />
-  <signal name="D2" driver=".TX > .D2" receiver=".RX > .D2" />
-</signalintegrity>
+<signalintegrity.simulation name="TRAFFIC" bitRate="20Mbps">
+  <signalintegrity.signal name="D0" driverRef=".TX > .D0" receiverRef=".RX > .D0" />
+  <signalintegrity.signal name="D1" driverRef=".TX > .D1" receiverRef=".RX > .D1" />
+  <signalintegrity.signal name="D2" driverRef=".TX > .D2" receiverRef=".RX > .D2" />
+</signalintegrity.simulation>
 
 {/* Same copper, D1 held low: the noise on D1 is crosstalk only */}
-<signalintegrity name="XTALK" bitRate="20Mbps">
-  <signal name="D0" driver=".TX > .D0" receiver=".RX > .D0" />
-  <signal name="D1" driver=".TX > .D1" receiver=".RX > .D1" quiet="low" />
-  <signal name="D2" driver=".TX > .D2" receiver=".RX > .D2" />
-</signalintegrity>
+<signalintegrity.simulation name="XTALK" bitRate="20Mbps">
+  <signalintegrity.signal name="D0" driverRef=".TX > .D0" receiverRef=".RX > .D0" />
+  <signalintegrity.signal name="D1" driverRef=".TX > .D1" receiverRef=".RX > .D1" quiet="low" />
+  <signalintegrity.signal name="D2" driverRef=".TX > .D2" receiverRef=".RX > .D2" />
+</signalintegrity.simulation>
 ```
 
 A quiet signal is still connected and still coupled. Its driver holds a
@@ -142,28 +142,28 @@ The two blocks are independent runs over the same board.
 ### Level 4: DDR3 write byte lane
 
 ```tsx
-<signalintegrity name="WRITE" bitRate="800Mbps" corner="typ">
-  <signal
+<signalintegrity.simulation name="WRITE" bitRate="800Mbps" corner="typical">
+  <signalintegrity.signal
     name="DQS"
-    driver={{
+    driverRef={{
       pin: { p: ".CPU > .DDR_DQS0", n: ".CPU > .DDR_DQSN0" },
       model: { p: "Model_579", n: "Model_771" },
     }}
-    receiver={{
+    receiverRef={{
       pin: { p: ".DRAM > .DQSL", n: ".DRAM > .DQSL_N" },
       model: { p: "ODT_off", n: "ODT_off" },
     }}
     pattern="clock"
     offset="0.5UI"
   />
-  <signal
+  <signalintegrity.signal
     name="DQ0"
-    driver={{ pin: ".CPU > .DDR_D0", model: "Model_257" }}
-    receiver={{ pin: ".DRAM > .DQL0", model: "ODT_off" }}
-    strobe="DQS"
+    driverRef={{ pin: ".CPU > .DDR_D0", model: "Model_257" }}
+    receiverRef={{ pin: ".DRAM > .DQL0", model: "ODT_off" }}
+    strobeRef="DQS"
     mask={{ setup: "10ps", hold: "45ps" }}
   />
-</signalintegrity>
+</signalintegrity.simulation>
 ```
 
 [`level4-ddr3-write.tsx`](../assets/2026-11-08-signal-integrity-signal-api/level4-ddr3-write.tsx)
@@ -182,7 +182,7 @@ memory-system design. It currently stops with the documented error:
 AM335x's package must be supported before it can run. A read test would need
 a separate block and receive-capable controller models.
 
-## `<signalintegrity>`
+## `<signalintegrity.simulation>`
 
 One block is one SI test: one coupled set of signals and one simulation run.
 
@@ -191,8 +191,8 @@ One block is one SI test: one coupled set of signals and one simulation run.
 | `name` | `string` | optional | Names the test in results. Required only when a board has more than one block. |
 | `bitRate` | `string \| number` | required | Default bit rate for signals. A number is in bit/s. |
 | `duration` | `string \| number` | see below | Simulated time. A number is in seconds. |
-| `corner` | `"typ" \| "min" \| "max"` | `"typ"` | IBIS corner used for every buffer in this test. |
-| `unlistedNets` | `"passive"` | `"passive"` | How copper not named by a `<signal>` is treated (below). |
+| `corner` | `"typical" \| "minimum" \| "maximum"` | `"typical"` | IBIS corner used for every buffer in this test. |
+| `unlistedNets` | `"passive"` | `"passive"` | How copper not named by a `<signalintegrity.signal>` is treated (below). |
 | `unrouted` | `"error" \| "ideal"` | `"error"` | What to do when a signal's path is not fully routed. |
 | `pdn` | `"ideal" \| "extracted"` | `"ideal"` | `"ideal"`: chip power and ground pins see perfect rails. `"extracted"` (power and ground copper simulated from geometry) is **not implemented yet** and fails with an error. |
 
@@ -254,13 +254,13 @@ the pipeline must not invent a receive or disabled mode.
 Blocks are independent. Each has its own signal set, run and results. They
 may name the same pins.
 
-## `<signal>`
+## `<signalintegrity.signal>`
 
 | Prop | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `name` | `string` | required | Unique within its block. |
-| `driver` | `Endpoint` | required | The one pin, or `{ p, n }` pair, that drives the signal. |
-| `receiver` | `Endpoint \| Endpoint[]` | required | Pin(s) where the signal is measured. An array means several receivers (multi-drop). |
+| `driverRef` | `Endpoint` | required | The one pin, or `{ p, n }` pair, that drives the signal. |
+| `receiverRef` | `Endpoint \| Endpoint[]` | required | Pin(s) where the signal is measured. An array means several receivers (multi-drop). |
 | `bitRate` | `string \| number` | block `bitRate` | Overrides the block bit rate for this signal. |
 | `pattern` | `"prbs7" \| "prbs15" \| "prbs31" \| "clock" \| string` | `"prbs7"` | Bits to send. Any other string is a literal bit string such as `"0011010"`, repeated. |
 | `seed` | `number` | spaced PRBS phases | Integer `1..2^n-1` for `prbsN`. See below. |
@@ -268,7 +268,7 @@ may name the same pins.
 | `quiet` | `"low" \| "high" \| "off"` | not quiet | Holds the driver steady instead of sending `pattern` (below). |
 | `probe` | `"local" \| "global"` | `"local"` | Ground reference for single-ended probes (below). |
 | `mask` | `"ibis" \| Mask` | `"ibis"` | Pass/fail limits for the eye (below). |
-| `strobe` | `string` | none | Name of another `<signal>` in the same block that samples this one. |
+| `strobeRef` | `string` | none | Name of another `<signalintegrity.signal>` in the same block that samples this one. |
 
 ### PRBS seeds
 
@@ -314,7 +314,7 @@ type Endpoint =
   selects each leg independently.
 
 Resolve each physical pin in this order: endpoint `model` override,
-`<ibismodel>` pin mapping, then the only model or an unambiguous selector.
+`<signalintegrity.ibismodel>` pin mapping, then the only model or an unambiguous selector.
 Otherwise error and list the choices. A selected model must belong to that
 pin and support its role. Every endpoint must have an IBIS model.
 
@@ -441,7 +441,7 @@ explicit `mask.vih`/`mask.vil`; never label a guessed pair `"ibis"`.
   corners. Missing usable thresholds at that corner are an error.
 - `mask={{ vih, vil }}` overrides the threshold pair. An object overrides
   supplied values; omitted values follow these rules.
-- `setup` and `hold` apply only with `strobe`. They are not in IBIS and come
+- `setup` and `hold` apply only with `strobeRef`. They are not in IBIS and come
   from the receiver's datasheet.
 
 For Micron `DQFULL_533`, `Vth=0.900`, `L=0.882`, `H=0.918` V,
@@ -455,9 +455,9 @@ Winbond `W631GG6MB-12` `ODT_off` has no `[Receiver Thresholds]` and uses
 vectors below are executable with the
 [contract self-check](../assets/2026-11-08-signal-integrity-signal-api/check-review.py).
 
-### `strobe`
+### `strobeRef`
 
-`strobe` must name a **different** switching signal in the same block.
+`strobeRef` must name a **different** switching signal in the same block.
 Self-reference, dependency cycles and quiet strobes are errors. Forward
 references are allowed.
 
@@ -479,7 +479,7 @@ The test is computed from information that must be on the board:
 
 | Information | Where it comes from |
 | --- | --- |
-| Buffer behaviour | `<ibismodel>` on each chip with an endpoint |
+| Buffer behaviour | `<signalintegrity.ibismodel>` on each chip with an endpoint |
 | Copper geometry | routed traces, vias and pours |
 | Dielectric and thickness | `fabricatorPreset` or an explicit stackup |
 | Via barrel copper thickness (when vias are present) | `pcb_stackup.plated_hole_copper_thickness`, emitted by `fabricatorPreset` or set by an explicit stackup |
@@ -489,13 +489,13 @@ The test is computed from information that must be on the board:
 If any of these is missing, rendering fails with a specific error. It does
 not fall back to guessed values.
 
-IBIS models are required, not optional. `<signalintegrity>` only names the
+IBIS models are required, not optional. `<signalintegrity.simulation>` only names the
 test; the electrical behaviour of every driver and receiver comes from the
-chip's `<ibismodel>`. This RFC does not fetch models automatically from
+chip's `<signalintegrity.ibismodel>`. This RFC does not fetch models automatically from
 `manufacturerPartNumber`. A model library that does so would be a separate
-proposal, and would produce the same `<ibismodel>` records.
+proposal, and would produce the same `<signalintegrity.ibismodel>` records.
 
-The `<ibismodel>` also carries choices the copper cannot show: which
+The `<signalintegrity.ibismodel>` also carries choices the copper cannot show: which
 `[Component]` in the file matches the package, and which `[Model]` each pin
 uses when the file has a `[Model Selector]` (for example the 3.3 V variant).
 An endpoint's `model` overrides that choice for one test. `sot23_5` in the
@@ -535,7 +535,7 @@ Each block produces, per signal:
 | Signal kind | Results |
 | --- | --- |
 | driven | receiver waveform(s), eye diagram, eye height and width, mask margin |
-| driven with `strobe` | per-edge setup and hold margin, worst case |
+| driven with `strobeRef` | per-edge setup and hold margin, worst case |
 | quiet (including constant literals) | near/far waveforms and signed positive/negative NEXT/FEXT peaks per pin, in volts |
 
 The block also reports the extracted RLGC matrices for the coupled set.
@@ -551,7 +551,7 @@ interface SimulationSignalIntegrity {
   name?: string
   bit_rate_bps: number
   duration_s?: number
-  corner: "typ" | "min" | "max"
+  corner: "typical" | "minimum" | "maximum"
   unlisted_nets: "passive"
   unrouted: "error" | "ideal"
   pdn: "extracted" | "ideal"
@@ -780,33 +780,33 @@ public Circuit JSON.
 
 | Condition | Error |
 | --- | --- |
-| `driver` pin has no IBIS model | `Signal "D0" driver .TX > .D0 has no <ibismodel>.` |
+| `driverRef` pin has no IBIS model | `Signal "D0" driver .TX > .D0 has no <signalintegrity.ibismodel>.` |
 | Ambiguous model selection | `.TX > .Y: choose an IBIS model from LVC1G04_OUT_18, LVC1G04_OUT_25, LVC1G04_OUT_33, LVC1G04_OUT_50.` |
 | Model is not valid for the pin or role | `.RX > .A: selected model does not support receiving on this pin.` |
 | Invalid PRBS seed | `Signal "D0": prbs7 seed must be an integer in 1..127.` |
 | Two signals share copper in one block | `Signals "D0" and "D1" are on the same net; one signal per net.` |
 | A second driving pin on the topology | `Signal "BUS" has two drivers: .TX > .A and .U3 > .A. Exactly one pin drives a signal.` |
-| `receiver` not on the driver's topology | `Receiver .RX > .A is not connected to the copper of signal "DATA".` |
+| `receiverRef` not on the driver's topology | `Receiver .RX > .A is not connected to the copper of signal "DATA".` |
 | `{ p, n }` legs swapped relative to IBIS `[Diff_pin]` | `Signal "BUS": .TX > .B is the inverting pin; swap p and n.` |
 | Path not routed and `unrouted="error"` | `Signal "DATA" is not routed between .TX > .Y and .RX > .A.` |
-| No stackup | `<signalintegrity> needs a stackup: set fabricatorPreset or define one.` |
+| No stackup | `<signalintegrity.simulation> needs a stackup: set fabricatorPreset or define one.` |
 | Unmodelled part on the path | `.D5 is on signal "DATA" and has no SPICE or IBIS model.` |
 | Placed model cannot be lowered | `.D5: placed SPICE model is unsupported; it cannot be discarded.` |
 | Conflicting ideal reference voltages | `.U1: shared reference VCC has incompatible IBIS corner voltages.` |
-| Two or more blocks and one has no `name` | `This board has 3 <signalintegrity> blocks; give each a name.` |
+| Two or more blocks and one has no `name` | `This board has 3 <signalintegrity.simulation> blocks; give each a name.` |
 | Bare `quiet` | `quiet needs a level: "low", "high" or "off".` |
 | `quiet="off"` without a disabled state | `Signal "DATA": .TX > .Y model LVC1G04_OUT_33 has no disabled state; use quiet="low" or "high".` |
 | Off victim has no unique idle voltage | `Signal "BUS": floating quiet victim has no undisturbed idle operating point.` |
-| `strobe` names an unknown signal | `Signal "DQ0" strobe "DQS" is not a signal in block "WRITE".` |
+| `strobeRef` names an unknown signal | `Signal "DQ0" strobe "DQS" is not a signal in block "WRITE".` |
 | Self-strobe or strobe cycle | `Signal "DQ0": strobe must name a different signal without a dependency cycle.` |
 | Quiet strobe | `Signal "DQ0": strobe "DQS" must switch.` |
 | Missing or ambiguous physical strobe receiver | `Signal "DQ0": expected exactly one DQS receiver on .DRAM.` |
-| Missing single-ended DC thresholds at the corner | `.RX > .A has no usable DC thresholds at min; specify mask.vih and mask.vil.` |
+| Missing single-ended DC thresholds at the corner | `.RX > .A has no usable DC thresholds at minimum; specify mask.vih and mask.vil.` |
 | Missing differential mask thresholds | `.RX > .A/.B has no usable differential thresholds; specify mask.vih and mask.vil.` |
 | Explicit duration too short | `Signal "DATA": explicit duration is too short for complete eye windows after settling.` |
 | Incomplete measurement coverage | `Signal "DATA": recording needs complete eye windows and transmitted high and low bits after settling.` |
 | No received strobe crossings | `Signal "DQ0": no received DQS crossings after settling.` |
-| `setup`/`hold` without `strobe` | `mask.setup and mask.hold need a strobe.` |
+| `setup`/`hold` without `strobeRef` | `mask.setup and mask.hold need a strobeRef.` |
 | Extracted PDN | `pdn="extracted" is not implemented yet.` |
 | Coupled `[Package Model]` | `.CPU: coupled [Package Model] not implemented yet; scalar fallback is forbidden.` |
 | Branched routed graph | `Signal "BUS": branched routed graphs are not implemented yet.` |
@@ -818,18 +818,20 @@ aliases.
 
 | Old | New |
 | --- | --- |
-| `<analog.transientsimulation spiceEngine="pcb_spice">` | `<signalintegrity>` |
+| `<analog.transientsimulation spiceEngine="pcb_spice">` | `<signalintegrity.simulation>` |
 | `ibisPinStates` | capability-based states above; unlisted Output-only pins drive low |
-| `pcbSpiceChannel` / `modeling.lanes` | the `<signal>` list |
+| `pcbSpiceChannel` / `modeling.lanes` | the `<signalintegrity.signal>` list |
 | `modeling.channelReference` | derived from the driver's IBIS ground pin |
 | `modeling.reduction`, `sections`, `extraction.*` | chosen by the implementation |
 | `modeling.profiles`, `straightened_stage_profiles` | the board's copper and stackup |
 | `passiveComponentRefs`, `termination` | placed passives on the topology |
 | `<analog.digitalstimulus>` (for SI) | `pattern`, `seed`, `offset`, `quiet` |
 | `inverted` on the second leg | `{ p, n }` |
-| `<voltageprobe>` (for SI) | `receiver`, `probe` |
-| `<analog.eyediagram>` (for SI) | automatic, using `bitRate` or `strobe` |
-| `modeling.ddrAssessments` | removed; generic `strobe`/`mask` does not replace DDR assessment |
+| `<voltageprobe>` (for SI) | `receiverRef`, `probe` |
+| `driver` / `receiver` / `strobe` | `driverRef` / `receiverRef` / `strobeRef` |
+| `corner` `"typ"` / `"min"` / `"max"` | `"typical"` / `"minimum"` / `"maximum"` |
+| `<analog.eyediagram>` (for SI) | automatic, using `bitRate` or `strobeRef` |
+| `modeling.ddrAssessments` | removed; generic `strobeRef`/`mask` does not replace DDR assessment |
 | `supply` | selected IBIS model rails at the test corner |
 | hand-appended `pcb_stackup` | `fabricatorPreset` or a board stackup |
 | `simulation.config.ts` / `modeling` export | nothing |
@@ -837,9 +839,11 @@ aliases.
 The `examples/` directory in `tscircuit/signal-integrity-pipeline` is
 rewritten using the levels above.
 
-`<ibismodel>` stays. It describes the chip, not the test. Its
+`<ibismodel>` becomes `<signalintegrity.ibismodel>`, so every signal-integrity element
+shares one namespace; core keeps `<ibismodel>` as an alias. It describes the
+chip, not the test. Its
 `modelValueCorner` prop is removed, because the corner is a test choice: it is
-set by `corner` on `<signalintegrity>`, so the same board can be run at all
+set by `corner` on `<signalintegrity.simulation>`, so the same board can be run at all
 three corners.
 
 Its `includePackageParasitics` prop is also removed. The package R, L and C
@@ -917,7 +921,7 @@ Earlier native prototype runs do not establish that the five PRs work together.
 
 ## Alternatives considered
 
-- **Arrays for differential pairs** (`driver={[".TX > .A", ".TX > .B"]}`).
+- **Arrays for differential pairs** (`driverRef={[".TX > .A", ".TX > .B"]}`).
   Rejected: an array cannot also mean "several receivers", which multi-drop
   and fly-by buses need.
 - **A `termination` prop.** Rejected: a placed resistor is either on the
@@ -927,14 +931,14 @@ Earlier native prototype runs do not establish that the five PRs work together.
 - **Keeping `modeling` as an advanced escape hatch.** Rejected: it keeps two
   sources of truth, and every value in it is either derivable from the board
   or a numerical setting.
-- **`analog.signalintegrity` / `analog.signal`.** Possible, if `<signal>` is
-  too generic as a top-level name. The props would be identical.
+- **Top-level `<signalintegrity>` and `<signal>`.** Rejected in review: they
+  are field names, not board elements, and `<signal>` is too generic. The
+  `signalintegrity.*` namespace follows `<assembly.*>`. `analog.*` was also
+  possible; the props would be identical.
 
 ## Open questions
 
-1. Should the element names be `<signalintegrity>` and `<signal>`, or live in
-   the `analog` namespace?
-2. Should a block accept a list of quiet configurations, so that the
+1. Should a block accept a list of quiet configurations, so that the
    all-switching and crosstalk runs of Level 3 can be written as one block?
-3. Should jitter (random and deterministic) on the driver be a `<signal>`
+2. Should jitter (random and deterministic) on the driver be a `<signalintegrity.signal>`
    prop in this RFC or in a follow-up?

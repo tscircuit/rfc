@@ -21,8 +21,8 @@ export default () => (
     <chip name="TX" manufacturerPartNumber="SN74LVC1G04DBV" footprint="sot23_5" pcbX={-15} pinLabels={pins} />
     <chip name="RX" manufacturerPartNumber="SN74LVC1G04DBV" footprint="sot23_5" pcbX={15} pinLabels={pins} />
 
-    <ibismodel componentRef=".TX" {...lvc1g04} />
-    <ibismodel componentRef=".RX" {...lvc1g04} />
+    <signalintegrity.ibismodel componentRef=".TX" {...lvc1g04} />
+    <signalintegrity.ibismodel componentRef=".RX" {...lvc1g04} />
 
     <trace from=".TX > .VCC" to="net.VCC" />
     <trace from=".RX > .VCC" to="net.VCC" />
@@ -33,8 +33,8 @@ export default () => (
 
     <copperpour connectsTo="net.GND" layer="bottom" unbroken />
 
-    <signalintegrity bitRate="20Mbps">
-      <signal name="DATA" driver=".TX > .Y" receiver=".RX > .A" />
-    </signalintegrity>
+    <signalintegrity.simulation bitRate="20Mbps">
+      <signalintegrity.signal name="DATA" driverRef=".TX > .Y" receiverRef=".RX > .A" />
+    </signalintegrity.simulation>
   </board>
 )

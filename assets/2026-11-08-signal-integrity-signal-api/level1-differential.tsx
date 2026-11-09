@@ -5,8 +5,8 @@ export default () => (
   <board width="60mm" height="20mm" layers={2} fabricatorPreset="jlcpcb_standard">
     <chip name="TX" manufacturerPartNumber="SN65HVD72D" footprint="soic8" pcbX={-25} pinLabels={transceiverPins} />
     <chip name="RX" manufacturerPartNumber="SN65HVD72D" footprint="soic8" pcbX={20} pinLabels={transceiverPins} />
-    <ibismodel componentRef=".TX" {...sn65hvd72} />
-    <ibismodel componentRef=".RX" {...sn65hvd72} />
+    <signalintegrity.ibismodel componentRef=".TX" {...sn65hvd72} />
+    <signalintegrity.ibismodel componentRef=".RX" {...sn65hvd72} />
 
     <resistor name="RTERM" resistance="120" footprint="0603" pcbX={26} />
 
@@ -22,12 +22,12 @@ export default () => (
     <differentialpair positiveConnection=".TX > .A" negativeConnection=".TX > .B" />
     <copperpour connectsTo="net.GND" layer="bottom" unbroken />
 
-    <signalintegrity bitRate="250kbps">
-      <signal
+    <signalintegrity.simulation bitRate="250kbps">
+      <signalintegrity.signal
         name="BUS"
-        driver={{ p: ".TX > .A", n: ".TX > .B" }}
-        receiver={{ p: ".RX > .A", n: ".RX > .B" }}
+        driverRef={{ p: ".TX > .A", n: ".TX > .B" }}
+        receiverRef={{ p: ".RX > .A", n: ".RX > .B" }}
       />
-    </signalintegrity>
+    </signalintegrity.simulation>
   </board>
 )

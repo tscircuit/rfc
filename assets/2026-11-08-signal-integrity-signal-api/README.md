@@ -1,6 +1,6 @@
-# Examples: `<signalintegrity>` and `<signal>`
+# Examples: `<signalintegrity.simulation>` and `<signalintegrity.signal>`
 
-The `<signalintegrity>` block describes the test. Everything else is the board.
+The `<signalintegrity.simulation>` block describes the test. Everything else is the board.
 
 | File | Level |
 | --- | --- |
