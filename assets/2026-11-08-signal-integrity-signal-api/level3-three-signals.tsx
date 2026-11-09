@@ -15,22 +15,22 @@ export default () => (
     <trace from=".TX2 > .Y" to=".RX2 > .A" />
     <copperpour connectsTo="net.GND" layer="bottom" unbroken />
 
-    <signalintegrity.simulation name="TRAFFIC" bitRate="20Mbps">
-      <signalintegrity.signal name="D0" driverRef=".TX0 > .Y" receiverRef=".RX0 > .A" />
-      <signalintegrity.signal name="D1" driverRef=".TX1 > .Y" receiverRef=".RX1 > .A" />
-      <signalintegrity.signal name="D2" driverRef=".TX2 > .Y" receiverRef=".RX2 > .A" />
-    </signalintegrity.simulation>
+    <simulation.pcbtransientchannelsimulation name="TRAFFIC" bitRate="20Mbps">
+      <simulation.pcbchannel name="D0" driverRef=".TX0 > .Y" receiverRef=".RX0 > .A" />
+      <simulation.pcbchannel name="D1" driverRef=".TX1 > .Y" receiverRef=".RX1 > .A" />
+      <simulation.pcbchannel name="D2" driverRef=".TX2 > .Y" receiverRef=".RX2 > .A" />
+    </simulation.pcbtransientchannelsimulation>
 
-    <signalintegrity.simulation name="XTALK_LOW" bitRate="20Mbps">
-      <signalintegrity.signal name="D0" driverRef=".TX0 > .Y" receiverRef=".RX0 > .A" />
-      <signalintegrity.signal name="D1" driverRef=".TX1 > .Y" receiverRef=".RX1 > .A" quiet="low" />
-      <signalintegrity.signal name="D2" driverRef=".TX2 > .Y" receiverRef=".RX2 > .A" />
-    </signalintegrity.simulation>
+    <simulation.pcbtransientchannelsimulation name="XTALK_LOW" bitRate="20Mbps">
+      <simulation.pcbchannel name="D0" driverRef=".TX0 > .Y" receiverRef=".RX0 > .A" />
+      <simulation.pcbchannel name="D1" driverRef=".TX1 > .Y" receiverRef=".RX1 > .A" quiet="low" />
+      <simulation.pcbchannel name="D2" driverRef=".TX2 > .Y" receiverRef=".RX2 > .A" />
+    </simulation.pcbtransientchannelsimulation>
 
-    <signalintegrity.simulation name="XTALK_HIGH" bitRate="20Mbps">
-      <signalintegrity.signal name="D0" driverRef=".TX0 > .Y" receiverRef=".RX0 > .A" />
-      <signalintegrity.signal name="D1" driverRef=".TX1 > .Y" receiverRef=".RX1 > .A" quiet="high" />
-      <signalintegrity.signal name="D2" driverRef=".TX2 > .Y" receiverRef=".RX2 > .A" />
-    </signalintegrity.simulation>
+    <simulation.pcbtransientchannelsimulation name="XTALK_HIGH" bitRate="20Mbps">
+      <simulation.pcbchannel name="D0" driverRef=".TX0 > .Y" receiverRef=".RX0 > .A" />
+      <simulation.pcbchannel name="D1" driverRef=".TX1 > .Y" receiverRef=".RX1 > .A" quiet="high" />
+      <simulation.pcbchannel name="D2" driverRef=".TX2 > .Y" receiverRef=".RX2 > .A" />
+    </simulation.pcbtransientchannelsimulation>
   </board>
 )

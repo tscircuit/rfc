@@ -1,6 +1,6 @@
-# Examples: `<signalintegrity.simulation>` and `<signalintegrity.signal>`
+# Examples: `<simulation.pcbtransientchannelsimulation>` and `<simulation.pcbchannel>`
 
-The `<signalintegrity.simulation>` block describes the test. Everything else is the board.
+The `<simulation.pcbtransientchannelsimulation>` block describes the test. Everything else is the board.
 
 | File | Level |
 | --- | --- |

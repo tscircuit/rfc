@@ -1,4 +1,4 @@
-# Signal Integrity with `<signalintegrity.simulation>` and `<signalintegrity.signal>`
+# Signal Integrity with `<simulation.pcbtransientchannelsimulation>` and `<simulation.pcbchannel>`
 
 ## Summary
 
@@ -6,12 +6,12 @@ A signal integrity (SI) test is described by naming the signals to test. The
 rest is read from the board.
 
 ```tsx
-<signalintegrity.simulation bitRate="20Mbps">
-  <signalintegrity.signal name="DATA" driverRef=".TX > .Y" receiverRef=".RX > .A" />
-</signalintegrity.simulation>
+<simulation.pcbtransientchannelsimulation bitRate="20Mbps">
+  <simulation.pcbchannel name="DATA" driverRef=".TX > .Y" receiverRef=".RX > .A" />
+</simulation.pcbtransientchannelsimulation>
 ```
 
-From one `<signalintegrity.signal>`, tscircuit:
+From one `<simulation.pcbchannel>`, tscircuit:
 
 - finds the copper the signal travels through and its ground return;
 - extracts the trace's coupled R, L, C and G;
@@ -20,8 +20,13 @@ From one `<signalintegrity.signal>`, tscircuit:
 - folds the waveform into an eye diagram and checks it against the receiver's
   thresholds.
 
-Each added `<signalintegrity.signal>` is coupled to the signals already in the block, so
+Each added `<simulation.pcbchannel>` is coupled to the signals already in the block, so
 crosstalk is simulated automatically.
+
+This is a **transient channel simulation**: one time-domain run per block,
+from IBIS driver through PCB copper to IBIS receiver. A channel is one
+driver-to-receiver path; a differential pair is one channel. Eyes,
+crosstalk and setup/hold are measurements of that one run's waveforms.
 
 This RFC **replaces** the hand-assembled SI API: `pcb_spice` transients with
 `ibisPinStates`, `pcbSpiceChannel`, per-pin `<analog.digitalstimulus>`,
@@ -63,15 +68,15 @@ The API should read the same way.
 
 ## Learning progression
 
-Start with one `<signalintegrity.signal>`, then add coupling and strobe measurements.
+Start with one `<simulation.pcbchannel>`, then add coupling and strobe measurements.
 A differential pair counts as **one** signal.
 
 | Level | TSX | What you learn |
 | --- | --- | --- |
-| 1 | one `<signalintegrity.signal>` (single-ended) | delay, overshoot, ringing, eye opening |
-| 1 | one `<signalintegrity.signal>` with `{ p, n }` endpoints | differential eye, common mode |
-| 2 | two `<signalintegrity.signal>`s | the signals now couple: each eye includes crosstalk |
-| 3 | three `<signalintegrity.signal>`s | full coupling; add `quiet` to one to measure crosstalk alone |
+| 1 | one `<simulation.pcbchannel>` (single-ended) | delay, overshoot, ringing, eye opening |
+| 1 | one `<simulation.pcbchannel>` with `{ p, n }` endpoints | differential eye, common mode |
+| 2 | two `<simulation.pcbchannel>`s | the signals now couple: each eye includes crosstalk |
+| 3 | three `<simulation.pcbchannel>`s | full coupling; add `quiet` to one to measure crosstalk alone |
 | 4 | DDR3 write byte lane, `strobeRef` and `mask` | real controller/memory buffers; generic timing, no JEDEC compliance |
 
 Board examples for each level are in
@@ -80,21 +85,21 @@ Board examples for each level are in
 ### Level 1: one single-ended signal
 
 ```tsx
-<signalintegrity.simulation bitRate="20Mbps">
-  <signalintegrity.signal name="DATA" driverRef=".TX > .Y" receiverRef=".RX > .A" />
-</signalintegrity.simulation>
+<simulation.pcbtransientchannelsimulation bitRate="20Mbps">
+  <simulation.pcbchannel name="DATA" driverRef=".TX > .Y" receiverRef=".RX > .A" />
+</simulation.pcbtransientchannelsimulation>
 ```
 
 ### Level 1: one differential signal
 
 ```tsx
-<signalintegrity.simulation bitRate="250kbps">
-  <signalintegrity.signal
+<simulation.pcbtransientchannelsimulation bitRate="250kbps">
+  <simulation.pcbchannel
     name="BUS"
     driverRef={{ p: ".TX > .A", n: ".TX > .B" }}
     receiverRef={{ p: ".RX > .A", n: ".RX > .B" }}
   />
-</signalintegrity.simulation>
+</simulation.pcbtransientchannelsimulation>
 ```
 
 The 120 Ω resistor between A and B is a normal `<resistor>` on the board. It
@@ -104,10 +109,10 @@ needed.
 ### Level 2: two signals
 
 ```tsx
-<signalintegrity.simulation bitRate="20Mbps">
-  <signalintegrity.signal name="D0" driverRef=".TX > .D0" receiverRef=".RX > .D0" />
-  <signalintegrity.signal name="D1" driverRef=".TX > .D1" receiverRef=".RX > .D1" />
-</signalintegrity.simulation>
+<simulation.pcbtransientchannelsimulation bitRate="20Mbps">
+  <simulation.pcbchannel name="D0" driverRef=".TX > .D0" receiverRef=".RX > .D0" />
+  <simulation.pcbchannel name="D1" driverRef=".TX > .D1" receiverRef=".RX > .D1" />
+</simulation.pcbtransientchannelsimulation>
 ```
 
 Both signals are extracted together, so their mutual inductance and
@@ -118,18 +123,18 @@ other signal.
 
 ```tsx
 {/* All three switching: real traffic */}
-<signalintegrity.simulation name="TRAFFIC" bitRate="20Mbps">
-  <signalintegrity.signal name="D0" driverRef=".TX > .D0" receiverRef=".RX > .D0" />
-  <signalintegrity.signal name="D1" driverRef=".TX > .D1" receiverRef=".RX > .D1" />
-  <signalintegrity.signal name="D2" driverRef=".TX > .D2" receiverRef=".RX > .D2" />
-</signalintegrity.simulation>
+<simulation.pcbtransientchannelsimulation name="TRAFFIC" bitRate="20Mbps">
+  <simulation.pcbchannel name="D0" driverRef=".TX > .D0" receiverRef=".RX > .D0" />
+  <simulation.pcbchannel name="D1" driverRef=".TX > .D1" receiverRef=".RX > .D1" />
+  <simulation.pcbchannel name="D2" driverRef=".TX > .D2" receiverRef=".RX > .D2" />
+</simulation.pcbtransientchannelsimulation>
 
 {/* Same copper, D1 held low: the noise on D1 is crosstalk only */}
-<signalintegrity.simulation name="XTALK" bitRate="20Mbps">
-  <signalintegrity.signal name="D0" driverRef=".TX > .D0" receiverRef=".RX > .D0" />
-  <signalintegrity.signal name="D1" driverRef=".TX > .D1" receiverRef=".RX > .D1" quiet="low" />
-  <signalintegrity.signal name="D2" driverRef=".TX > .D2" receiverRef=".RX > .D2" />
-</signalintegrity.simulation>
+<simulation.pcbtransientchannelsimulation name="XTALK" bitRate="20Mbps">
+  <simulation.pcbchannel name="D0" driverRef=".TX > .D0" receiverRef=".RX > .D0" />
+  <simulation.pcbchannel name="D1" driverRef=".TX > .D1" receiverRef=".RX > .D1" quiet="low" />
+  <simulation.pcbchannel name="D2" driverRef=".TX > .D2" receiverRef=".RX > .D2" />
+</simulation.pcbtransientchannelsimulation>
 ```
 
 A quiet signal is still connected and still coupled. Its driver holds a
@@ -142,8 +147,8 @@ The two blocks are independent runs over the same board.
 ### Level 4: DDR3 write byte lane
 
 ```tsx
-<signalintegrity.simulation name="WRITE" bitRate="800Mbps" corner="typical">
-  <signalintegrity.signal
+<simulation.pcbtransientchannelsimulation name="WRITE" bitRate="800Mbps" corner="typical">
+  <simulation.pcbchannel
     name="DQS"
     driverRef={{
       pin: { p: ".CPU > .DDR_DQS0", n: ".CPU > .DDR_DQSN0" },
@@ -156,14 +161,14 @@ The two blocks are independent runs over the same board.
     pattern="clock"
     offset="0.5UI"
   />
-  <signalintegrity.signal
+  <simulation.pcbchannel
     name="DQ0"
     driverRef={{ pin: ".CPU > .DDR_D0", model: "Model_257" }}
     receiverRef={{ pin: ".DRAM > .DQL0", model: "ODT_off" }}
     strobeRef="DQS"
     mask={{ setup: "10ps", hold: "45ps" }}
   />
-</signalintegrity.simulation>
+</simulation.pcbtransientchannelsimulation>
 ```
 
 [`level4-ddr3-write.tsx`](../assets/2026-11-08-signal-integrity-signal-api/level4-ddr3-write.tsx)
@@ -182,7 +187,7 @@ memory-system design. It currently stops with the documented error:
 AM335x's package must be supported before it can run. A read test would need
 a separate block and receive-capable controller models.
 
-## `<signalintegrity.simulation>`
+## `<simulation.pcbtransientchannelsimulation>`
 
 One block is one SI test: one coupled set of signals and one simulation run.
 
@@ -192,7 +197,7 @@ One block is one SI test: one coupled set of signals and one simulation run.
 | `bitRate` | `string \| number` | required | Default bit rate for signals. A number is in bit/s. |
 | `duration` | `string \| number` | see below | Simulated time. A number is in seconds. |
 | `corner` | `"typical" \| "minimum" \| "maximum"` | `"typical"` | IBIS corner used for every buffer in this test. |
-| `unlistedNets` | `"passive"` | `"passive"` | How copper not named by a `<signalintegrity.signal>` is treated (below). |
+| `unlistedNets` | `"passive"` | `"passive"` | How copper not named by a `<simulation.pcbchannel>` is treated (below). |
 | `unrouted` | `"error" \| "ideal"` | `"error"` | What to do when a signal's path is not fully routed. |
 | `pdn` | `"ideal" \| "extracted"` | `"ideal"` | `"ideal"`: chip power and ground pins see perfect rails. `"extracted"` (power and ground copper simulated from geometry) is **not implemented yet** and fails with an error. |
 
@@ -254,7 +259,7 @@ the pipeline must not invent a receive or disabled mode.
 Blocks are independent. Each has its own signal set, run and results. They
 may name the same pins.
 
-## `<signalintegrity.signal>`
+## `<simulation.pcbchannel>`
 
 | Prop | Type | Default | Meaning |
 | --- | --- | --- | --- |
@@ -268,7 +273,7 @@ may name the same pins.
 | `quiet` | `"low" \| "high" \| "off"` | not quiet | Holds the driver steady instead of sending `pattern` (below). |
 | `probe` | `"local" \| "global"` | `"local"` | Ground reference for single-ended probes (below). |
 | `mask` | `"ibis" \| Mask` | `"ibis"` | Pass/fail limits for the eye (below). |
-| `strobeRef` | `string` | none | Name of another `<signalintegrity.signal>` in the same block that samples this one. |
+| `strobeRef` | `string` | none | Name of another `<simulation.pcbchannel>` in the same block that samples this one. |
 
 ### PRBS seeds
 
@@ -314,7 +319,7 @@ type Endpoint =
   selects each leg independently.
 
 Resolve each physical pin in this order: endpoint `model` override,
-`<signalintegrity.ibismodel>` pin mapping, then the only model or an unambiguous selector.
+`<simulation.ibismodel>` pin mapping, then the only model or an unambiguous selector.
 Otherwise error and list the choices. A selected model must belong to that
 pin and support its role. Every endpoint must have an IBIS model.
 
@@ -479,7 +484,7 @@ The test is computed from information that must be on the board:
 
 | Information | Where it comes from |
 | --- | --- |
-| Buffer behaviour | `<signalintegrity.ibismodel>` on each chip with an endpoint |
+| Buffer behaviour | `<simulation.ibismodel>` on each chip with an endpoint |
 | Copper geometry | routed traces, vias and pours |
 | Dielectric and thickness | `fabricatorPreset` or an explicit stackup |
 | Via barrel copper thickness (when vias are present) | `pcb_stackup.plated_hole_copper_thickness`, emitted by `fabricatorPreset` or set by an explicit stackup |
@@ -489,13 +494,13 @@ The test is computed from information that must be on the board:
 If any of these is missing, rendering fails with a specific error. It does
 not fall back to guessed values.
 
-IBIS models are required, not optional. `<signalintegrity.simulation>` only names the
+IBIS models are required, not optional. `<simulation.pcbtransientchannelsimulation>` only names the
 test; the electrical behaviour of every driver and receiver comes from the
-chip's `<signalintegrity.ibismodel>`. This RFC does not fetch models automatically from
+chip's `<simulation.ibismodel>`. This RFC does not fetch models automatically from
 `manufacturerPartNumber`. A model library that does so would be a separate
-proposal, and would produce the same `<signalintegrity.ibismodel>` records.
+proposal, and would produce the same `<simulation.ibismodel>` records.
 
-The `<signalintegrity.ibismodel>` also carries choices the copper cannot show: which
+The `<simulation.ibismodel>` also carries choices the copper cannot show: which
 `[Component]` in the file matches the package, and which `[Model]` each pin
 uses when the file has a `[Model Selector]` (for example the 3.3 V variant).
 An endpoint's `model` overrides that choice for one test. `sot23_5` in the
@@ -780,7 +785,7 @@ public Circuit JSON.
 
 | Condition | Error |
 | --- | --- |
-| `driverRef` pin has no IBIS model | `Signal "D0" driver .TX > .D0 has no <signalintegrity.ibismodel>.` |
+| `driverRef` pin has no IBIS model | `Signal "D0" driver .TX > .D0 has no <simulation.ibismodel>.` |
 | Ambiguous model selection | `.TX > .Y: choose an IBIS model from LVC1G04_OUT_18, LVC1G04_OUT_25, LVC1G04_OUT_33, LVC1G04_OUT_50.` |
 | Model is not valid for the pin or role | `.RX > .A: selected model does not support receiving on this pin.` |
 | Invalid PRBS seed | `Signal "D0": prbs7 seed must be an integer in 1..127.` |
@@ -789,11 +794,11 @@ public Circuit JSON.
 | `receiverRef` not on the driver's topology | `Receiver .RX > .A is not connected to the copper of signal "DATA".` |
 | `{ p, n }` legs swapped relative to IBIS `[Diff_pin]` | `Signal "BUS": .TX > .B is the inverting pin; swap p and n.` |
 | Path not routed and `unrouted="error"` | `Signal "DATA" is not routed between .TX > .Y and .RX > .A.` |
-| No stackup | `<signalintegrity.simulation> needs a stackup: set fabricatorPreset or define one.` |
+| No stackup | `<simulation.pcbtransientchannelsimulation> needs a stackup: set fabricatorPreset or define one.` |
 | Unmodelled part on the path | `.D5 is on signal "DATA" and has no SPICE or IBIS model.` |
 | Placed model cannot be lowered | `.D5: placed SPICE model is unsupported; it cannot be discarded.` |
 | Conflicting ideal reference voltages | `.U1: shared reference VCC has incompatible IBIS corner voltages.` |
-| Two or more blocks and one has no `name` | `This board has 3 <signalintegrity.simulation> blocks; give each a name.` |
+| Two or more blocks and one has no `name` | `This board has 3 <simulation.pcbtransientchannelsimulation> blocks; give each a name.` |
 | Bare `quiet` | `quiet needs a level: "low", "high" or "off".` |
 | `quiet="off"` without a disabled state | `Signal "DATA": .TX > .Y model LVC1G04_OUT_33 has no disabled state; use quiet="low" or "high".` |
 | Off victim has no unique idle voltage | `Signal "BUS": floating quiet victim has no undisturbed idle operating point.` |
@@ -818,16 +823,16 @@ aliases.
 
 | Old | New |
 | --- | --- |
-| `<analog.transientsimulation spiceEngine="pcb_spice">` | `<signalintegrity.simulation>` |
+| `<analog.transientsimulation spiceEngine="pcb_spice">` | `<simulation.pcbtransientchannelsimulation>` |
 | `ibisPinStates` | capability-based states above; unlisted Output-only pins drive low |
-| `pcbSpiceChannel` / `modeling.lanes` | the `<signalintegrity.signal>` list |
+| `pcbSpiceChannel` / `modeling.lanes` | the `<simulation.pcbchannel>` list |
 | `modeling.channelReference` | derived from the driver's IBIS ground pin |
 | `modeling.reduction`, `sections`, `extraction.*` | chosen by the implementation |
 | `modeling.profiles`, `straightened_stage_profiles` | the board's copper and stackup |
 | `passiveComponentRefs`, `termination` | placed passives on the topology |
 | `<analog.digitalstimulus>` (for SI) | `pattern`, `seed`, `offset`, `quiet` |
 | `inverted` on the second leg | `{ p, n }` |
-| `<ibismodel>` | `<signalintegrity.ibismodel>` |
+| `<ibismodel>` | `<simulation.ibismodel>` |
 | `<voltageprobe>` (for SI) | `receiverRef`, `probe` |
 | `driver` / `receiver` / `strobe` | `driverRef` / `receiverRef` / `strobeRef` |
 | `corner` `"typ"` / `"min"` / `"max"` | `"typical"` / `"minimum"` / `"maximum"` |
@@ -840,11 +845,11 @@ aliases.
 The `examples/` directory in `tscircuit/signal-integrity-pipeline` is
 rewritten using the levels above.
 
-`<ibismodel>` becomes `<signalintegrity.ibismodel>`, so every signal-integrity element
-shares one namespace. The old `<ibismodel>` name is removed. It describes the
+`<ibismodel>` becomes `<simulation.ibismodel>`, beside the other simulation
+elements. The old `<ibismodel>` name is removed. It describes the
 chip, not the test. Its
 `modelValueCorner` prop is removed, because the corner is a test choice: it is
-set by `corner` on `<signalintegrity.simulation>`, so the same board can be run at all
+set by `corner` on `<simulation.pcbtransientchannelsimulation>`, so the same board can be run at all
 three corners.
 
 Its `includePackageParasitics` prop is also removed. The package R, L and C
@@ -861,12 +866,14 @@ pair. General transient simulation with `<voltageprobe>` is unchanged.
 
 ## Implementation
 
-1. **props:** zod schemas for `signalintegrity` and `signal`, with the
+1. **props:** zod schemas for `pcbtransientchannelsimulation` and `pcbchannel`, with the
    endpoint union and unit parsing. There is no lane cap; default PRBS phases
    have the finite domain defined above.
 2. **circuit-json:** the source and result records above. Remove
    `pcb_spice_channel` and the lane caps.
-3. **core:** add `signalintegrity` and `signal` to the element catalogue.
+3. **core:** add `simulation.pcbtransientchannelsimulation`,
+   `simulation.pcbchannel` and `simulation.ibismodel` to the `simulation`
+   namespace (`core/lib/namespaced-elements/simulation.ts`).
    At render they resolve selectors, compute topology, check the
    diagnostics, and emit source records. Omit automatic `duration_s`.
 4. **signal-integrity-pipeline:** Circuit JSON is the only electrical input.
@@ -933,13 +940,25 @@ Earlier native prototype runs do not establish that the five PRs work together.
   sources of truth, and every value in it is either derivable from the board
   or a numerical setting.
 - **Top-level `<signalintegrity>` and `<signal>`.** Rejected in review: they
-  are field names, not board elements, and `<signal>` is too generic. The
-  `signalintegrity.*` namespace follows `<assembly.*>`. `analog.*` was also
-  possible; the props would be identical.
+  are field names, not board elements, and `<signal>` is too generic.
+- **A `signalintegrity.*` namespace.** Replaced by the existing `simulation.*`
+  namespace, which already holds `<simulation.pcbreturncurrentsimulation>`
+  and its `<simulation.pcbreturncurrentexcitation>` children; this RFC uses
+  the same container-plus-children shape.
+- **`pcbchannelsimulation` with an `analysis` or `type` prop.** Rejected:
+  "channel simulation" covers several analyses (transient, statistical eye,
+  TDR, S-parameters) with different props and outputs. This RFC is the
+  transient one, so the name says so. A statistical eye would be a separate
+  `pcbstatisticalchannelsimulation`, as `analog.transientsimulation` and
+  `analog.acsweepsimulation` are separate elements.
+- **Extending `<pcbreturncurrentsimulation>`.** Rejected: it applies a fixed
+  current and solves the return-current field; this applies IBIS buffers and
+  a bit pattern in the time domain. Almost no prop or output is shared, so
+  they share selector-resolution code, not the element.
 
 ## Open questions
 
 1. Should a block accept a list of quiet configurations, so that the
    all-switching and crosstalk runs of Level 3 can be written as one block?
-2. Should jitter (random and deterministic) on the driver be a `<signalintegrity.signal>`
+2. Should jitter (random and deterministic) on the driver be a `<simulation.pcbchannel>`
    prop in this RFC or in a follow-up?
