@@ -10,7 +10,6 @@ The `<simulation.pcbtransientchannelsimulation>` block describes the test. Every
 | `level3-three-channels.tsx` | 3: all switching, and a quiet victim for crosstalk |
 | `level4-ddr3-write.tsx` | 4: AM335x → Winbond DDR3 DQ0–DQ7 + DQS/DQS# write illustration; blocked by coupled package support |
 | `parts.tsx` | shared inverter and transceiver IBIS declarations |
-| `models/README.md` | vendor downloads, package/pin/model choices and SHA-256 |
 
 Every endpoint has a real IBIS model. Ideal rails come from each selected
 model; no voltage source is needed. Unlisted Output-only pins drive low.
