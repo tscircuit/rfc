@@ -827,6 +827,7 @@ aliases.
 | `passiveComponentRefs`, `termination` | placed passives on the topology |
 | `<analog.digitalstimulus>` (for SI) | `pattern`, `seed`, `offset`, `quiet` |
 | `inverted` on the second leg | `{ p, n }` |
+| `<ibismodel>` | `<signalintegrity.ibismodel>` |
 | `<voltageprobe>` (for SI) | `receiverRef`, `probe` |
 | `driver` / `receiver` / `strobe` | `driverRef` / `receiverRef` / `strobeRef` |
 | `corner` `"typ"` / `"min"` / `"max"` | `"typical"` / `"minimum"` / `"maximum"` |
@@ -840,7 +841,7 @@ The `examples/` directory in `tscircuit/signal-integrity-pipeline` is
 rewritten using the levels above.
 
 `<ibismodel>` becomes `<signalintegrity.ibismodel>`, so every signal-integrity element
-shares one namespace; core keeps `<ibismodel>` as an alias. It describes the
+shares one namespace. The old `<ibismodel>` name is removed. It describes the
 chip, not the test. Its
 `modelValueCorner` prop is removed, because the corner is a test choice: it is
 set by `corner` on `<signalintegrity.simulation>`, so the same board can be run at all
