@@ -1,32 +1,25 @@
 # Examples: `<simulation.pcbtransientchannelsimulation>` and `<simulation.pcbchannel>`
 
-The `<simulation.pcbtransientchannelsimulation>` block describes the test.
-It records voltage-vs-time waveforms; everything else is the board.
+Each level keeps its board source, PCB snapshot and simulation CSV together.
 
-| File | Level and waveforms |
+| Source | Level and waveforms |
 | --- | --- |
-| `level1-single-ended-channel.tsx` | 1: one receiver waveform |
-| `level1-differential-channel.tsx` | 1: one P−N receiver waveform (RS-485 with 120 Ω termination) |
-| `level2-two-channels.tsx` | 2: two coupled receiver waveforms |
-| `level3-three-channels.tsx` | 3: three receiver waveforms; quiet runs also record the victim's near end and idle levels |
-| `level4-ddr3-write.tsx` | 4: eight DQ receiver waveforms and one P−N DQS waveform; blocked by coupled package support |
-| `parts.tsx` | shared inverter and transceiver IBIS declarations |
+| [level1-single-ended.tsx](level1-single-ended/level1-single-ended.tsx) | 1: one receiver waveform |
+| [level1-differential.tsx](level1-differential/level1-differential.tsx) | 1: one P−N receiver waveform (RS-485 with 120 Ω termination) |
+| [level2-two-channels.tsx](level2-two-channels/level2-two-channels.tsx) | 2: two coupled receiver waveforms |
+| [level3-three-channels.tsx](level3-three-channels/level3-three-channels.tsx) | 3: three receiver waveforms; quiet runs also record the victim's near end and idle levels |
+| [level4-ddr3-write.tsx](level4-ddr3-write/level4-ddr3-write.tsx) | 4: eight DQ receiver waveforms and one P−N DQS waveform; requires coupled package support |
+| [parts.tsx](parts.tsx) | shared inverter and transceiver IBIS declarations |
 
-Every endpoint has a real IBIS model. Ideal rails come from each selected
-model; no voltage source is needed. Unlisted Output-only pins drive low.
-`quiet="off"` is an error on the non-disableable inverter outputs.
+PCB snapshots (`<level>/<level>.png`) and simulation CSVs
+(`<level>/simoutput.csv`) will be generated alongside the TSX in a later step.
+IBIS assets resolve from each run's project root under `models/`.
 
-Level 3 preserves PRBS phases across runs. `TRAFFIC` gives three receiver
-waveforms. `XTALK_LOW` and `XTALK_HIGH` also record quiet D1's near-end
-waveform, with an undisturbed idle voltage on each of D1's near/far waveforms.
+Every endpoint has a real IBIS model. Ideal die rails come from each selected
+model; package parasitics remain between the die and PCB pins. Unlisted
+Output-only pins drive low. `quiet="off"` is an error on the inverter outputs.
+Level 3 preserves PRBS phases across traffic and quiet runs.
 
 Level 4 uses physical BGA ball coordinates and per-leg DQS models at 1.5 V
-(`typical`). The half-UI DQS offset centre-aligns the transmitted write strobe.
-This is a DQ0–DQ7 + DQS/DQS# write-direction
-illustration, not JEDEC compliance or a complete memory-system board.
-It currently stops with
-`.CPU: coupled [Package Model] not implemented yet; scalar fallback is forbidden.`
-
-These are proposed-contract examples, not verified native pipeline runs.
-The sibling PRs still need the contract fixes. Extracted PDN, coupled packages,
-branched routed graphs and native DDR validation remain unimplemented.
+(`typical`), with a half-UI DQS offset. It currently requires coupled package
+support: `.CPU: coupled [Package Model] not implemented yet; scalar fallback is forbidden.`

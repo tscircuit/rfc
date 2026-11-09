@@ -1,3 +1,5 @@
+import { simulation } from "@tscircuit/core"
+
 // Shared TI inverter and transceiver models used by the examples.
 export const Inverter = (props: { name: string; pcbX: number; pcbY?: number }) => (
   <>

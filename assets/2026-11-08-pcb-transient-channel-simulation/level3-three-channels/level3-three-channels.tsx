@@ -1,5 +1,7 @@
+import { simulation } from "@tscircuit/core"
+
 // LEVEL 3: three receiver waveforms; quiet D1 also has a near waveform and near/far idle levels.
-import { Inverter } from "./parts"
+import { Inverter } from "../parts"
 
 export default () => (
   <board width="40mm" height="24mm" layers={2} fabricatorPreset="jlcpcb_standard">

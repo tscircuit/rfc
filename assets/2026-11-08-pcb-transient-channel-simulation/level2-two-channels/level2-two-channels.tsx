@@ -1,5 +1,7 @@
+import { simulation } from "@tscircuit/core"
+
 // LEVEL 2: two receiver waveforms, including coupling between the channels.
-import { Inverter } from "./parts"
+import { Inverter } from "../parts"
 
 export default () => (
   <board width="40mm" height="20mm" layers={2} fabricatorPreset="jlcpcb_standard">

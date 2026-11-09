@@ -7,6 +7,8 @@ rest is read from the board. The output is voltage-vs-time waveforms, like a
 scope capture at each receiver.
 
 ```tsx
+import { simulation } from "@tscircuit/core"
+
 <simulation.pcbtransientchannelsimulation bitRate="20Mbps">
   <simulation.pcbchannel name="DATA" driverRef=".TX > .Y" receiverRef=".RX > .A" />
 </simulation.pcbtransientchannelsimulation>
@@ -82,6 +84,8 @@ Board examples for each level are in
 ### Level 1: one single-ended signal
 
 ```tsx
+import { simulation } from "@tscircuit/core"
+
 <simulation.pcbtransientchannelsimulation bitRate="20Mbps">
   <simulation.pcbchannel name="DATA" driverRef=".TX > .Y" receiverRef=".RX > .A" />
 </simulation.pcbtransientchannelsimulation>
@@ -92,6 +96,8 @@ This records one voltage-vs-time waveform at `.RX > .A`.
 ### Level 1: one differential signal
 
 ```tsx
+import { simulation } from "@tscircuit/core"
+
 <simulation.pcbtransientchannelsimulation bitRate="250kbps">
   <simulation.pcbchannel
     name="BUS"
@@ -109,6 +115,8 @@ waveforms are not emitted.
 ### Level 2: two signals
 
 ```tsx
+import { simulation } from "@tscircuit/core"
+
 <simulation.pcbtransientchannelsimulation bitRate="20Mbps">
   <simulation.pcbchannel name="D0" driverRef=".TX > .D0" receiverRef=".RX > .D0" />
   <simulation.pcbchannel name="D1" driverRef=".TX > .D1" receiverRef=".RX > .D1" />
@@ -122,6 +130,8 @@ received from the other signal.
 ### Level 3: three signals, and a quiet victim
 
 ```tsx
+import { simulation } from "@tscircuit/core"
+
 {/* All three switching: real traffic */}
 <simulation.pcbtransientchannelsimulation name="TRAFFIC" bitRate="20Mbps">
   <simulation.pcbchannel name="D0" driverRef=".TX > .D0" receiverRef=".RX > .D0" />
@@ -155,6 +165,8 @@ three blocks are independent runs over the same board.
 ### Level 4: DDR3 write byte lane
 
 ```tsx
+import { simulation } from "@tscircuit/core"
+
 <simulation.pcbtransientchannelsimulation name="WRITE" bitRate="800Mbps" corner="typical">
   <simulation.pcbchannel
     name="DQS"
@@ -177,14 +189,14 @@ three blocks are independent runs over the same board.
 </simulation.pcbtransientchannelsimulation>
 ```
 
-[`level4-ddr3-write.tsx`](../assets/2026-11-08-pcb-transient-channel-simulation/level4-ddr3-write.tsx)
+[`level4-ddr3-write.tsx`](../assets/2026-11-08-pcb-transient-channel-simulation/level4-ddr3-write/level4-ddr3-write.tsx)
 connects AM335x `am335x_zcz` to Winbond `W631GG6MB-12`: DQ0–DQ7 and
 DQS/DQS#. Both use 1.5 V at `typ`. The half-UI DQS offset centre-aligns the
 transmitted write strobe with data. The intended output is eight DQ receiver
 waveforms and one P−N DQS receiver waveform.
 
-This is a write-direction illustration, not JEDEC compliance or a complete
-memory-system design. It currently stops with the documented error:
+This write test covers the byte lane; JEDEC compliance and a complete
+memory-system design are outside its scope. It currently stops with:
 `.CPU: coupled [Package Model] not implemented yet; scalar fallback is forbidden.`
 AM335x's package must be supported before it can run. A read test would need
 a separate block and receive-capable controller models.
@@ -201,29 +213,24 @@ One block is one SI test: one coupled set of signals and one simulation run.
 | `corner` | `"typical" \| "minimum" \| "maximum"` | `"typical"` | IBIS corner used for every buffer in this test. |
 | `unlistedNets` | `"passive"` | `"passive"` | How copper not named by a `<simulation.pcbchannel>` is treated (below). |
 | `unrouted` | `"error" \| "ideal"` | `"error"` | What to do when a signal's path is not fully routed. |
-| `pdn` | `"ideal" \| "extracted"` | `"ideal"` | `"ideal"`: chip power and ground pins see perfect rails. `"extracted"` (power and ground copper simulated from geometry) is **not implemented yet** and fails with an error. |
+| `pdn` | `"ideal" \| "extracted"` | `"ideal"` | `"ideal"`: die supply and ground reference nodes are ideal; package parasitics remain between die nodes and PCB pins. `"extracted"` (power and ground copper simulated from geometry) is **not implemented yet** and fails with an error. |
 
 ### Recording time
 
 Recording starts at `t = 0`. Bit 0 starts at `offset`; before it, the driver
-holds bit 0. An offset is nonnegative and uses that signal's UI. `clock`
+holds bit 0. Offsets are nonnegative; UI strings use that channel's bit rate. `clock`
 repeats `01`, so its period is 2 UI. Quiet levels apply from `t = 0`.
 
-For each switching signal, let `UI_i = 1 / bitRate_i`. The common settling
-boundary is `S = max(offset_i + 16 * UI_i)`. Let `T` be the least common
-multiple in time of all switching pattern periods, including different bit
-rates. PRBS periods are `(2^n - 1) * UI_i`; literal periods are their bit count
-times UI. This covers the joint cycle, not just the longest pattern.
-
-The automatic duration is `S + T`, so every pattern period is fully recorded
-at least once after settling. A zero-offset clock records 18 UI. A quiet-only
-block automatically records 32 times the largest UI. All waveforms include
-the full recording from `t = 0`.
+For switching channels, let `UI_i = 1 / bitRate_i` and
+`S = max(offset_i + 16 * UI_i)`. Automatic duration is
+`S + 128 * max(UI_i)`. This is a startup allowance followed by a finite
+capture, not a guarantee of electrical settling or a complete pattern cycle.
+Quiet-only blocks record `32 * max(UI_i)`. Recording starts at zero.
+Use explicit `duration` for a longer capture.
 
 Absent `duration` leaves source `duration_s` absent. Core never fills in an
 automatic value. Present `duration_s` is a finite, positive explicit bound;
-the pipeline must not extend it, even if it ends before settling or a full
-pattern cycle. The final recording duration is reported as
+the pipeline must never extend it. The final recording duration is reported as
 `result.blocks[].duration_s`; source records retain the user's choice.
 
 ### Unlisted copper
@@ -260,7 +267,7 @@ may name the same pins.
 | `bitRate` | `string \| number` | block `bitRate` | Overrides the block bit rate for this signal. |
 | `pattern` | `"prbs7" \| "prbs15" \| "prbs31" \| "clock" \| string` | `"prbs7"` | Bits to send. Any other string is a literal bit string such as `"0011010"`, repeated. |
 | `seed` | `number` | spaced PRBS phases | Integer `1..2^n-1` for `prbsN`. See below. |
-| `offset` | `string \| number` | `"0UI"` | Nonnegative start time of bit 0 from recording time zero. Accepts `UI` or time units. |
+| `offset` | `string \| number` | `"0UI"` | Nonnegative start time of bit 0. Numbers are seconds; strings accept time units or UI at this channel's bit rate. |
 | `quiet` | `"low" \| "high" \| "off"` | not quiet | Holds the driver steady instead of sending `pattern` (below). |
 | `probe` | `"local" \| "global"` | `"local"` | Ground reference for single-ended probes (below). |
 
@@ -373,12 +380,14 @@ Constant literals (`"0"`, `"1"`, `"000"`, `"111"`, etc.) are normalized to
 
 ### `probe`
 
-- `"local"` measures each single-ended pin against the ground pin of its own
+- `"local"` measures each single-ended pin against the PCB ground pin of its own
   chip. This matches a scope probe with a short ground lead.
 - `"global"` measures against the block's reference ground.
 
 Differential waveforms always record `P − N`; `probe` has no effect on them.
-With ideal PDN, local and global ground are the same ideal reference.
+With ideal die rails, local and global probes can still differ by the voltage
+across package ground parasitics. Local means the PCB ground pin; global
+means the block reference.
 
 ## Board requirements
 
@@ -448,16 +457,8 @@ Differential endpoints emit P−N only; separate P and N waveforms are not
 kept. Extracted RLGC records are retained as solver output, not measurements.
 The block also reports its final recording duration.
 
-Any script, tool or AI can derive the following from the waveform records
-or exported CSV; no measurement elements are added. The existing
-`<analog.eyediagram>` can still be used, but is not required.
-
-| Result | How to derive it from the waveforms |
-| --- | --- |
-| Eye diagram, height and width | fold the receiver waveform into 2-UI windows and measure the opening |
-| Mask margin | compare the receiver waveform with receiver thresholds |
-| NEXT/FEXT | subtract each quiet channel's idle level from its near/far waveform and find the peaks |
-| Setup/hold | compare data threshold crossings with strobe crossings |
+Downstream tools can derive measurements from these waveform records or
+exported CSV; this API adds no measurement elements.
 
 ## Circuit JSON
 
@@ -527,10 +528,7 @@ interface SimulationSignalIntegrityRlgc {
   type: "simulation_signal_integrity_rlgc"
   simulation_signal_integrity_rlgc_id: string
   simulation_signal_integrity_id: string
-  conductors: (
-    | { simulation_signal_id: string; leg: "p" | "n" | "single" }
-    | { source_trace_id: string }
-  )[]
+  conductors: { simulation_signal_id: string; leg: "p" | "n" | "single" }[]
   matrices: {
     frequency_hz: number
     r_ohm: number[][]
@@ -565,10 +563,10 @@ RLGC has nonempty `conductors` and `matrices` arrays. Each matrix is
 `conductors.length` square at its positive `frequency_hz`;
 frequencies are unique and increasing. Rows and columns use the same listed
 conductor order at every frequency. Entries are total ohms, henries, farads
-and siemens, not per metre. A pair contributes distinct P and N entries with
-the same logical signal ID. A single-ended signal contributes `single`;
-unlisted copper uses its source trace ID. Conductor identities are unique;
-internal mesh partitions and junctions must not duplicate a logical leg.
+and siemens, not per metre. A pair contributes distinct P and N rows; a
+single-ended channel contributes `single`. Public matrices select only listed
+legs. Unlisted copper remains in the private extraction and transient model.
+Conductor identities are unique.
 
 R and L are loop matrices, one loop per conductor against the eliminated
 return: `R = Aᵀ R_primitive A`, `L = Aᵀ L_primitive A`, with `A = [I; -ones]`.
@@ -755,8 +753,6 @@ shared with the CLI.
 The sibling PRs still need the waveform-only output, duration provenance,
 RLGC basis, placed-model preservation, pin-state and CLI boundary fixes.
 They are updated separately.
-The current assets are contract examples, not verified native pipeline runs.
-Earlier native prototype runs do not establish that the five PRs work together.
 
 ## Alternatives considered
 

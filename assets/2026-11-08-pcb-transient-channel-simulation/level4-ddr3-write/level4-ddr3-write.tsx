@@ -1,4 +1,6 @@
-/* LEVEL 4: AM335x -> W631GG6MB-12 DDR3 lower-byte write illustration, not JEDEC compliance.
+import { simulation } from "@tscircuit/core"
+
+/* LEVEL 4: AM335x -> W631GG6MB-12 DDR3 lower-byte write test.
  * Intended output: eight DQ receiver waveforms and one P−N DQS receiver waveform.
  * Currently stops with: .CPU: coupled [Package Model] not implemented yet; scalar fallback is forbidden.
  * Typ corner is 1.5 V. DQS is delayed 0.5 UI to centre-align the transmitted write strobe.
