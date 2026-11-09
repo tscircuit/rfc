@@ -1,4 +1,4 @@
-// LEVEL 3: three channels, and measuring crosstalk on its own.
+// LEVEL 3: three receiver waveforms; quiet D1 also has a near waveform and near/far idle levels.
 import { Inverter } from "./parts"
 
 export default () => (

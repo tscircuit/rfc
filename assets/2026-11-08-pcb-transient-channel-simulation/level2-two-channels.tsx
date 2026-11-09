@@ -1,4 +1,4 @@
-// LEVEL 2: two coupled channels.
+// LEVEL 2: two receiver waveforms, including coupling between the channels.
 import { Inverter } from "./parts"
 
 export default () => (

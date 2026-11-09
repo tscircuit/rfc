@@ -3,7 +3,8 @@
 ## Summary
 
 A signal integrity (SI) test is described by naming the signals to test. The
-rest is read from the board.
+rest is read from the board. The output is voltage-vs-time waveforms, like a
+scope capture at each receiver.
 
 ```tsx
 <simulation.pcbtransientchannelsimulation bitRate="20Mbps">
@@ -16,22 +17,18 @@ From one `<simulation.pcbchannel>`, tscircuit:
 - finds the copper the signal travels through and its ground return;
 - extracts the trace's coupled R, L, C and G;
 - drives the driver's IBIS buffer with a test pattern;
-- records the waveform at the receiver;
-- folds the waveform into an eye diagram and checks it against the receiver's
-  thresholds.
+- records the waveform at each receiver.
 
 Each added `<simulation.pcbchannel>` is coupled to the signals already in the block, so
 crosstalk is simulated automatically.
 
 This is a **transient channel simulation**: one time-domain run per block,
 from IBIS driver through PCB copper to IBIS receiver. A channel is one
-driver-to-receiver path; a differential pair is one channel. Eyes,
-crosstalk and setup/hold are measurements of that one run's waveforms.
+driver-to-receiver path; a differential pair is one channel.
 
-This RFC **replaces** the hand-assembled SI API: `pcb_spice` transients with
-`ibisPinStates`, `pcbSpiceChannel`, per-pin `<analog.digitalstimulus>`,
-`<voltageprobe>` and `<analog.eyediagram>`, plus a separate `modeling`
-configuration file. The [Removed API](#removed-api) section lists the changes.
+This RFC **replaces** the hand-assembled SI configuration: `pcb_spice` transients
+with `ibisPinStates`, `pcbSpiceChannel`, per-pin stimulus and probes, plus a
+separate `modeling` file. The [Removed API](#removed-api) section lists the changes.
 This is the target contract; the sibling implementation PRs still need the
 review fixes. See [Not implemented yet](#not-implemented-yet).
 
@@ -62,22 +59,22 @@ crosstalk with no error.
 
 In a lab, an SI test is described in terms of signals:
 
-> Drive this pin, probe that pin, hold this neighbour quiet, read the eye.
+> Drive this pin, probe that pin, hold this neighbour quiet, record the waveforms.
 
 The API should read the same way.
 
 ## Learning progression
 
-Start with one `<simulation.pcbchannel>`, then add coupling and strobe measurements.
+Start with one `<simulation.pcbchannel>`, then add coupled signals.
 A differential pair counts as **one** signal.
 
-| Level | TSX | What you learn |
+| Level | TSX | Waveforms |
 | --- | --- | --- |
-| 1 | one `<simulation.pcbchannel>` (single-ended) | delay, overshoot, ringing, eye opening |
-| 1 | one `<simulation.pcbchannel>` with `{ p, n }` endpoints | differential eye, common mode |
-| 2 | two `<simulation.pcbchannel>`s | the signals now couple: each eye includes crosstalk |
-| 3 | three `<simulation.pcbchannel>`s | full coupling; add `quiet` to one to measure crosstalk alone |
-| 4 | DDR3 write byte lane, `strobeRef` and `mask` | real controller/memory buffers; generic timing, no JEDEC compliance |
+| 1 | one `<simulation.pcbchannel>` (single-ended) | one receiver waveform |
+| 1 | one `<simulation.pcbchannel>` with `{ p, n }` endpoints | one P−N receiver waveform |
+| 2 | two `<simulation.pcbchannel>`s | two receiver waveforms, including coupling |
+| 3 | three `<simulation.pcbchannel>`s | three receiver waveforms; quiet runs also record the victim's near end and idle levels |
+| 4 | DDR3 DQ0–7 + DQS write stimulus | eight DQ receiver waveforms and one P−N DQS waveform once coupled packages are supported |
 
 Board examples for each level are in
 [`assets/2026-11-08-pcb-transient-channel-simulation/`](../assets/2026-11-08-pcb-transient-channel-simulation/).
@@ -89,6 +86,8 @@ Board examples for each level are in
   <simulation.pcbchannel name="DATA" driverRef=".TX > .Y" receiverRef=".RX > .A" />
 </simulation.pcbtransientchannelsimulation>
 ```
+
+This records one voltage-vs-time waveform at `.RX > .A`.
 
 ### Level 1: one differential signal
 
@@ -104,7 +103,8 @@ Board examples for each level are in
 
 The 120 Ω resistor between A and B is a normal `<resistor>` on the board. It
 is simulated because it is on the signal's copper. No `termination` prop is
-needed.
+needed. The result is one P−N waveform at the receiver; separate P and N
+waveforms are not emitted.
 
 ### Level 2: two signals
 
@@ -116,10 +116,10 @@ needed.
 ```
 
 Both signals are extracted together, so their mutual inductance and
-capacitance are included. Each eye shows the crosstalk received from the
-other signal.
+capacitance are included. Each receiver waveform includes the crosstalk
+received from the other signal.
 
-### Level 3: three signals, and measuring crosstalk
+### Level 3: three signals, and a quiet victim
 
 ```tsx
 {/* All three switching: real traffic */}
@@ -130,19 +130,27 @@ other signal.
 </simulation.pcbtransientchannelsimulation>
 
 {/* Same copper, D1 held low: the noise on D1 is crosstalk only */}
-<simulation.pcbtransientchannelsimulation name="XTALK" bitRate="20Mbps">
+<simulation.pcbtransientchannelsimulation name="XTALK_LOW" bitRate="20Mbps">
   <simulation.pcbchannel name="D0" driverRef=".TX > .D0" receiverRef=".RX > .D0" />
   <simulation.pcbchannel name="D1" driverRef=".TX > .D1" receiverRef=".RX > .D1" quiet="low" />
+  <simulation.pcbchannel name="D2" driverRef=".TX > .D2" receiverRef=".RX > .D2" />
+</simulation.pcbtransientchannelsimulation>
+
+{/* Same copper, D1 held high */}
+<simulation.pcbtransientchannelsimulation name="XTALK_HIGH" bitRate="20Mbps">
+  <simulation.pcbchannel name="D0" driverRef=".TX > .D0" receiverRef=".RX > .D0" />
+  <simulation.pcbchannel name="D1" driverRef=".TX > .D1" receiverRef=".RX > .D1" quiet="high" />
   <simulation.pcbchannel name="D2" driverRef=".TX > .D2" receiverRef=".RX > .D2" />
 </simulation.pcbtransientchannelsimulation>
 ```
 
 A quiet signal is still connected and still coupled. Its driver holds a
-steady level, so any voltage change on it comes from its neighbours. Its
-near-end (driver side) and far-end (receiver side) waveforms are reported as
-NEXT and FEXT.
+steady level, so any voltage change on it comes from its neighbours.
 
-The two blocks are independent runs over the same board.
+`TRAFFIC` gives three receiver waveforms. `XTALK_LOW` and `XTALK_HIGH` each
+give the D0 and D2 receiver waveforms, plus quiet D1's near-end (driver) and
+far-end (receiver) waveforms, each with its undisturbed idle voltage. The
+three blocks are independent runs over the same board.
 
 ### Level 4: DDR3 write byte lane
 
@@ -165,8 +173,6 @@ The two blocks are independent runs over the same board.
     name="DQ0"
     driverRef={{ pin: ".CPU > .DDR_D0", model: "Model_257" }}
     receiverRef={{ pin: ".DRAM > .DQL0", model: "ODT_off" }}
-    strobeRef="DQS"
-    mask={{ setup: "10ps", hold: "45ps" }}
   />
 </simulation.pcbtransientchannelsimulation>
 ```
@@ -174,12 +180,8 @@ The two blocks are independent runs over the same board.
 [`level4-ddr3-write.tsx`](../assets/2026-11-08-pcb-transient-channel-simulation/level4-ddr3-write.tsx)
 connects AM335x `am335x_zcz` to Winbond `W631GG6MB-12`: DQ0–DQ7 and
 DQS/DQS#. Both use 1.5 V at `typ`. The half-UI DQS offset centre-aligns the
-transmitted write strobe with data. Each data eye folds on its received DQS.
-
-The 10 ps setup / 45 ps hold values are the DDR3-1600 base values in
-[Winbond's datasheet, A03, Table 54, p. 158](https://media.digikey.com/pdf/Data%20Sheets/Winbond%20PDFs/W631GG6MB_A03.pdf#page=158).
-They are teaching limits here: the generic mask uses one DC threshold pair,
-without slew derating or DDR's separate AC setup and DC hold checks.
+transmitted write strobe with data. The intended output is eight DQ receiver
+waveforms and one P−N DQS receiver waveform.
 
 This is a write-direction illustration, not JEDEC compliance or a complete
 memory-system design. It currently stops with the documented error:
@@ -213,26 +215,15 @@ multiple in time of all switching pattern periods, including different bit
 rates. PRBS periods are `(2^n - 1) * UI_i`; literal periods are their bit count
 times UI. This covers the joint cycle, not just the longest pattern.
 
-Set `a_i = offset_i + ceil((S - offset_i) / UI_i) * UI_i`. The pipeline
-computes the automatic minimum `max(a_i + T + UI_i)`. For a fixed-grid eye,
-start one 2-UI window at each bit boundary in `[a_i, a_i + T)`: exactly
-`T / UI_i` complete windows. A zero-offset clock therefore records 19 UI
-and supplies two complete windows.
-The eye excludes settling and requires windows for transmitted high and low
-bits.
-
-A strobe eye records a full data UI on either side of its sampling instant
-(received crossing plus data offset). The pipeline extends automatic duration
-for offsets, propagation and complete windows until at least the same window
-count fits. Missing crossings or either transmitted bit class are errors.
-A quiet-only block automatically records 32 times the largest UI and measures
-after `16 * max(UI_i)`. Quiet peaks in mixed blocks use `[S, duration]`.
+The automatic duration is `S + T`, so every pattern period is fully recorded
+at least once after settling. A zero-offset clock records 18 UI. A quiet-only
+block automatically records 32 times the largest UI. All waveforms include
+the full recording from `t = 0`.
 
 Absent `duration` leaves source `duration_s` absent. Core never fills in an
-automatic value. Present `duration_s` is the user's explicit bound; the pipeline
-must not extend it. Insufficient complete-window coverage fails with
-`Signal "DATA": explicit duration is too short for complete eye windows after settling.`
-The signal name varies. The final recording duration is reported as
+automatic value. Present `duration_s` is a finite, positive explicit bound;
+the pipeline must not extend it, even if it ends before settling or a full
+pattern cycle. The final recording duration is reported as
 `result.blocks[].duration_s`; source records retain the user's choice.
 
 ### Unlisted copper
@@ -265,15 +256,13 @@ may name the same pins.
 | --- | --- | --- | --- |
 | `name` | `string` | required | Unique within its block. |
 | `driverRef` | `Endpoint` | required | The one pin, or `{ p, n }` pair, that drives the signal. |
-| `receiverRef` | `Endpoint \| Endpoint[]` | required | Pin(s) where the signal is measured. An array means several receivers (multi-drop). |
+| `receiverRef` | `Endpoint \| Endpoint[]` | required | Pin(s) where waveforms are recorded. An array means several receivers (multi-drop). |
 | `bitRate` | `string \| number` | block `bitRate` | Overrides the block bit rate for this signal. |
 | `pattern` | `"prbs7" \| "prbs15" \| "prbs31" \| "clock" \| string` | `"prbs7"` | Bits to send. Any other string is a literal bit string such as `"0011010"`, repeated. |
 | `seed` | `number` | spaced PRBS phases | Integer `1..2^n-1` for `prbsN`. See below. |
 | `offset` | `string \| number` | `"0UI"` | Nonnegative start time of bit 0 from recording time zero. Accepts `UI` or time units. |
 | `quiet` | `"low" \| "high" \| "off"` | not quiet | Holds the driver steady instead of sending `pattern` (below). |
 | `probe` | `"local" \| "global"` | `"local"` | Ground reference for single-ended probes (below). |
-| `mask` | `"ibis" \| Mask` | `"ibis"` | Pass/fail limits for the eye (below). |
-| `strobeRef` | `string` | none | Name of another `<simulation.pcbchannel>` in the same block that samples this one. |
 
 ### PRBS seeds
 
@@ -369,15 +358,18 @@ UART and I²C idle high, while many buses idle low.
 
 A quiet signal is probed at both ends:
 
-- the **near end** is the driver pin, and its waveform is the NEXT result;
-- the **far end** is each receiver pin, and its waveform is the FEXT result.
+- the **near end** is the driver pin;
+- the **far end** is each receiver pin.
+
+Each waveform carries its undisturbed idle voltage, so the noise can be
+derived by subtraction.
 
 `quiet="off"` requires a disabled state on every driver leg. An Output-only
 model without one is an error. Do not synthesize a passive input mode.
 
 Constant literals (`"0"`, `"1"`, `"000"`, `"111"`, etc.) are normalized to
 `quiet="low"` or `quiet="high"`. Explicit `quiet` takes precedence over
-`pattern`. All quiet signals have near/far crosstalk results and no eye.
+`pattern`. All quiet signals have near/far waveforms and idle voltages.
 
 ### `probe`
 
@@ -385,96 +377,8 @@ Constant literals (`"0"`, `"1"`, `"000"`, `"111"`, etc.) are normalized to
   chip. This matches a scope probe with a short ground lead.
 - `"global"` measures against the block's reference ground.
 
-Differential signals always measure `P − N`. With ideal PDN, local and
-global ground are the same ideal reference. Extracted PDN must define mask
-reference conversion before it can support global-ground threshold checks.
-
-### `mask`
-
-```ts
-type Mask = {
-  vih?: string | number
-  vil?: string | number
-  setup?: string | number
-  hold?: string | number
-}
-```
-
-- Single-ended `"ibis"` starts with the selected model's DC `Vinh`/`Vinl`.
-  For each field, `[Model Spec]` overrides `[Model]`: select its `typ`, `min`
-  or `max` column at that operating corner. A `[Model]` scalar applies at
-  all corners. `[Model Spec]` `NA` in min/max means its typical value,
-  as specified by [IBIS 7.1, §6.1, pp. 64–65](https://ibis.org/ver7.1/ver7_1.pdf#page=65).
-  Missing required typical values are unavailable.
-- A usable `[Receiver Thresholds]` DC pair overrides that pair. At **every**
-  corner, use `H = Vth_max` and `L = Vth_min`; each missing optional extremum
-  uses `Vth`. These are extrema at **typical operating conditions**, not
-  operating corners. This chooses the conservative envelope where extrema
-  are supplied; it invents no spread where only nominal `Vth` is supplied.
-  With signed DC offsets, `vih = H + Δc + Vinh_dc` and
-  `vil = L + Δc + Vinl_dc`. AC offsets are not used.
-
-| Operating corner `c` | Reference supply `S(c)` | Correction `Δc` |
-| --- | --- | --- |
-| `typ` | `typ` value | `0` |
-| `min` | `min` value | `Threshold_sensitivity × (S(min) − S(typ))` |
-| `max` | `max` value | `Threshold_sensitivity × (S(max) − S(typ))` |
-
-`S` is the keyword named by `Reference_supply`: `Power_clamp_ref`,
-`Gnd_clamp_ref`, `Pullup_ref`, `Pulldown_ref` or `Ext_ref` selects the
-corresponding `[... Reference]` keyword. If that keyword is omitted, IBIS
-defaults Pullup/POWER Clamp to `[Voltage Range]` and Pulldown/GND Clamp to
-0 V; External Reference has no default (§6.1, pp. 78–80). An explicit `NA`
-supply value is unavailable for this conversion. A scalar supply applies at
-all corners. Apply the correction even with `pdn="ideal"`: a static corner rail
-can differ from the typical rail. See
-[IBIS 7.1, §6.1, `[Receiver Thresholds]`, pp. 71–73](https://ibis.org/ver7.1/ver7_1.pdf#page=71),
-especially “Vth at Minimum or Maximum Operating Conditions” on p. 73.
-
-Missing `Vth` or either DC offset makes this conversion unavailable.
-At `typ`, omitted sensitivity/reference needs no correction. At `min`/`max`,
-require sensitivity, its named reference, and numeric typical/selected supply
-values; do not assume zero sensitivity. A sensitivity without its required
-reference is unusable at any corner. If conversion is unavailable, use the
-complete DC `Vinh`/`Vinl` pair above. If that is unavailable too, require
-explicit `mask.vih`/`mask.vil`; never label a guessed pair `"ibis"`.
-
-- Differential `"ibis"` uses `[Diff_pin] vdiff`, overridden by
-  `[Receiver Thresholds] Vdiff_dc` when present: `vih = +vdiff`, `vil = -vdiff`.
-  SN65HVD72 therefore uses **+0.2 V / -0.2 V**, never its legs' TTL limits.
-- Use the test corner for corner-valued fields; a scalar applies to all
-  corners. Missing usable thresholds at that corner are an error.
-- `mask={{ vih, vil }}` overrides the threshold pair. An object overrides
-  supplied values; omitted values follow these rules.
-- `setup` and `hold` apply only with `strobeRef`. They are not in IBIS and come
-  from the receiver's datasheet.
-
-For Micron `DQFULL_533`, `Vth=0.900`, `L=0.882`, `H=0.918` V,
-DC offsets are ±0.125 V, sensitivity is 0.50, and `[Pullup Reference]`
-is 1.8/1.7/1.9 V. At `min`, `Δc=0.50×(1.7−1.8)=−0.050 V`, so
-`vih=0.993 V`, `vil=0.707 V`. A 0.740 V low fails. The full corner pairs
-(`vih`/`vil`, V) are `1.043/0.757`, `0.993/0.707`, `1.093/0.807`.
-Winbond `W631GG6MB-12` `ODT_off` has no `[Receiver Thresholds]` and uses
-0.9/0.6 V at all corners. AM335x receive `Model_1000` uses `[Model Spec]`:
-0.85/0.65, 0.8125/0.6125, 0.8875/0.6875 V.
-
-### `strobeRef`
-
-`strobeRef` must name a **different** switching signal in the same block.
-Self-reference, dependency cycles and quiet strobes are errors. Forward
-references are allowed.
-
-For each data receiver, exactly one strobe receiver must be on the **same
-receiving chip** (`source_component_id`). Both legs of a differential endpoint
-must be on that chip. Missing or ambiguous matches are errors; never fall
-back to another chip's sole receiver.
-
-Sample both rising and falling received crossings at `(vih + vil) / 2`
-(zero for a symmetric differential mask). Missing crossings are an error.
-For strobed data, add its `offset` to the received crossing to get the
-sampling instant. Use the transmitted bit and signed interval rules below
-for setup/hold; an invalid sample or a negative margin fails.
-This is a generic single-threshold measurement, not native DDR validation.
+Differential waveforms always record `P − N`; `probe` has no effect on them.
+With ideal PDN, local and global ground are the same ideal reference.
 
 ## Board requirements
 
@@ -526,22 +430,34 @@ The following are chosen by the implementation and are not props:
 - the time step.
 
 The implementation derives them from the IBIS edge rates, `bitRate` and the
-board geometry, and refines until extraction and every reported observable
-converge, including each receiver's signed crosstalk peaks. An aggregate
+board geometry, and refines until extraction and every recorded waveform
+converge, including small disturbances on quiet channels. An aggregate
 waveform RMS alone is insufficient. The result must not depend on the order
 in which signals are written.
 
 ## Results
 
-Each block produces, per signal:
+Each block produces voltage-vs-time waveforms:
 
-| Signal kind | Results |
+| Signal kind | Waveforms |
 | --- | --- |
-| driven | receiver waveform(s), eye diagram, eye height and width, mask margin |
-| driven with `strobeRef` | per-edge setup and hold margin, worst case |
-| quiet (including constant literals) | near/far waveforms and signed positive/negative NEXT/FEXT peaks per pin, in volts |
+| switching | one far-end waveform at each receiver |
+| quiet (including constant literals) | one near-end waveform at the driver and one far-end waveform at each receiver, each with its undisturbed idle voltage |
 
-The block also reports the extracted RLGC matrices for the coupled set.
+Differential endpoints emit P−N only; separate P and N waveforms are not
+kept. Extracted RLGC records are retained as solver output, not measurements.
+The block also reports its final recording duration.
+
+Any script, tool or AI can derive the following from the waveform records
+or exported CSV; no measurement elements are added. The existing
+`<analog.eyediagram>` can still be used, but is not required.
+
+| Result | How to derive it from the waveforms |
+| --- | --- |
+| Eye diagram, height and width | fold the receiver waveform into 2-UI windows and measure the opening |
+| Mask margin | compare the receiver waveform with receiver thresholds |
+| NEXT/FEXT | subtract each quiet channel's idle level from its near/far waveform and find the peaks |
+| Setup/hold | compare data threshold crossings with strobe crossings |
 
 ## Circuit JSON
 
@@ -573,8 +489,6 @@ interface SimulationSignal {
   offset_s: number
   quiet?: "low" | "high" | "off"
   probe: "local" | "global"
-  mask: "ibis" | { vih_v?: number; vil_v?: number; setup_s?: number; hold_s?: number }
-  strobe_simulation_signal_id?: string
 }
 
 type SignalEndpoint =
@@ -589,9 +503,8 @@ type SignalEndpoint =
 ```
 
 PRBS source records carry the resolved seed in the range above. A pair's
-string model override expands to both per-leg fields. Strobe IDs must refer
-to a different signal in the same block. Constant literals carry their
-normalized `quiet` state.
+string model override expands to both per-leg fields. Constant literals
+carry their normalized `quiet` state.
 
 Result records, produced by the simulation. These are the exact shared
 interfaces; props, core, Circuit JSON, pipeline and CLI must use one contract.
@@ -607,38 +520,7 @@ interface SimulationSignalWaveform {
   source_port_id: string
   timestamps_s: number[]
   voltage_levels: number[]
-}
-
-interface SimulationSignalEye {
-  type: "simulation_signal_eye"
-  simulation_signal_eye_id: string
-  simulation_signal_id: string
-  source_port_id: string
-  folded_traces: { timestamps_s: number[]; voltage_levels: number[] }[]
-  eye_height_v: number
-  eye_width_s: number
-  mask_margin_v: number
-}
-
-interface SimulationSignalCrosstalk {
-  type: "simulation_signal_crosstalk"
-  simulation_signal_crosstalk_id: string
-  simulation_signal_id: string
-  end: "near" | "far"
-  source_port_id: string
-  idle_voltage_v: number
-  peak_positive_v: number
-  peak_negative_v: number
-}
-
-interface SimulationSignalStrobeMargin {
-  type: "simulation_signal_strobe_margin"
-  simulation_signal_strobe_margin_id: string
-  simulation_signal_id: string
-  source_port_id: string
-  edges: { time_s: number; setup_margin_s: number; hold_margin_s: number }[]
-  worst_setup_margin_s: number
-  worst_hold_margin_s: number
+  idle_voltage_v?: number
 }
 
 interface SimulationSignalIntegrityRlgc {
@@ -660,77 +542,24 @@ interface SimulationSignalIntegrityRlgc {
 ```
 
 Waveforms use parallel, nonempty arrays of equal length: strictly increasing
-recording times in seconds and voltages in volts. Each eye has at least one
-complete folded trace in the same shape; its times run from 0 to 2 UI.
-Every numeric result must be finite. Eye width is nonnegative. Eye height
-and mask margin may be negative. Waveforms span `0..result.blocks[].duration_s`.
+recording times in seconds and voltages in volts. Every numeric result must
+be finite. Waveforms span `0..result.blocks[].duration_s`.
+CSV exports preserve channel/end/pin identities, time and voltage samples,
+and quiet idle voltages.
 
-Eye and strobe measurements use the transmitted bit, never a received-voltage
-decision.
-For fixed-grid folding, sample the first bit's UI centre (`0.5 UI` in the
-2-UI trace). For strobe folding, centre the trace at the received crossing
-plus data offset (`1 UI` in the trace). Match received strobe edges in order
-to transmitted edges of the same polarity, starting before the settling gate;
-classify by the transmitted data bit at that transmitted edge plus data offset.
-There is no phase optimization. Use linear interpolation between waveform
-samples, including threshold crossings.
+Emit one far waveform per receiver for every signal. For a quiet signal,
+also emit one near waveform for its driver. `source_port_id` identifies the
+receiver for `end="far"` and the driver for `end="near"`. Never collapse
+receivers into a maximum. For a differential endpoint, `source_port_id` is
+its P port and voltage is P−N; separate leg waveforms are not emitted.
 
-| Field | Definition over all complete folded traces at that receiver |
-| --- | --- |
-| `eye_height_v` | minimum '1' voltage minus maximum '0' voltage at the sampling instant |
-| `eye_width_s` | width of the maximal continuous interval containing that instant where every '1' trace stays ≥ `vih` and every '0' trace stays ≤ `vil`; zero if either condition fails at the instant; bounded by the folded domain |
-| `mask_margin_v` | minimum of `v - vih` for all '1' samples and `vil - v` for all '0' samples at that instant |
-
-The bit class stays fixed while finding the interval. Both classes must be
-present. Differential measurements use P−N for every voltage and threshold.
-
-Emit one far waveform and eye per switching receiver. For a quiet signal,
-emit one waveform and crosstalk record **per receiver**, plus one near
-waveform and crosstalk record for its driver. `end="near"` means NEXT;
-`end="far"` means FEXT. Never collapse receivers into a maximum. For a
-differential endpoint, `source_port_id` is its P port and voltage is P−N.
-
-At each measured end, find the undisturbed idle voltage from the same
-circuit with aggressors held at their initial levels. Keep the victim's
-selected quiet state, including off, and its termination. Over the measurement
-gate, `peak_positive_v = max(0, max(V - idle_voltage_v))` and
-`peak_negative_v = min(0, min(V - idle_voltage_v))`. Never subtract the
-disturbed waveform's mean. A floating off victim without a unique idle
+`idle_voltage_v` is required on every quiet waveform and absent on switching
+waveforms. At each quiet endpoint, find the undisturbed idle voltage from
+the same circuit with aggressors held at their initial levels. Keep the
+victim's selected quiet state, including off, its termination and its probe
+reference; for a differential endpoint the idle voltage is P−N. Never use
+the disturbed waveform's mean. A floating off victim without a unique idle
 operating point is an error.
-
-Strobe margins are per data receiver. `edges` contains both crossing
-polarities in time order; `time_s` is the absolute sampling instant (received
-crossing plus data offset), in seconds. For each matched edge, the expected
-bit `b` is the transmitted data bit at the **transmitted** edge plus data
-offset. Keep `b` fixed even if received timing crosses a bit boundary.
-
-Within the recorded waveform, form maximal continuous intervals valid for
-`b`: `V ≥ vih` for '1', `V ≤ vil` for '0'. Differential V is P−N. Associate
-the interval `[a,b_end]` containing sample time `t`; if none contains it,
-choose the interval nearest to `t` (distance to its nearest boundary), with
-the earliest start breaking a tie. Never use the opposite bit's interval.
-With nonnegative requested times `s` and `h` (each defaults to zero):
-
-`setup_margin = t − a − s`; `hold_margin = b_end − t − h`.
-
-Thus a late valid interval gives negative setup; an early one gives negative
-hold. An invalid sample **always fails**, including `s=h=0`. If no interval
-for the expected bit exists anywhere in the recording of duration `D > 0`,
-emit finite margins `−D−s`, `−D−h` and fail. Do not discard that edge.
-Intervals with no observed crossing at a recording end are clipped to `0`
-or `D`; use only observed valid time, never extrapolate an infinite interval.
-Worst margins are the minima of the nonempty edge arrays.
-
-These vectors use `t=1 ns`, expected '1', `D=3 ns`, VIH/VIL=0.9/0.6 V.
-All times and margins in the table are ns.
-
-| Case | Expected-bit valid interval | `s` / `h` | Setup / hold margin | Result |
-| --- | --- | --- | --- | --- |
-| Valid | [0.50, 1.50] | .010 / .045 | +.490 / +.455 | pass |
-| Late; sample 0.75 V | [1.02, 2.08] | .010 / .045 | −.030 / +1.035 | fail |
-| Early | [0.20, 0.98] | .010 / .045 | +.790 / −.065 | fail |
-| Wrong bit; stable 0.10 V | none | .010 / .045 | −3.010 / −3.045 | fail |
-| Zero requirements; sample 0.75 V | [1.02, 2.08] | 0 / 0 | −.020 / +1.080 | fail |
 
 RLGC has nonempty `conductors` and `matrices` arrays. Each matrix is
 `conductors.length` square at its positive `frequency_hz`;
@@ -800,24 +629,15 @@ public Circuit JSON.
 | Bare `quiet` | `quiet needs a level: "low", "high" or "off".` |
 | `quiet="off"` without a disabled state | `Signal "DATA": .TX > .Y model LVC1G04_OUT_33 has no disabled state; use quiet="low" or "high".` |
 | Off victim has no unique idle voltage | `Signal "BUS": floating quiet victim has no undisturbed idle operating point.` |
-| `strobeRef` names an unknown signal | `Signal "DQ0" strobe "DQS" is not a signal in block "WRITE".` |
-| Self-strobe or strobe cycle | `Signal "DQ0": strobe must name a different signal without a dependency cycle.` |
-| Quiet strobe | `Signal "DQ0": strobe "DQS" must switch.` |
-| Missing or ambiguous physical strobe receiver | `Signal "DQ0": expected exactly one DQS receiver on .DRAM.` |
-| Missing single-ended DC thresholds at the corner | `.RX > .A has no usable DC thresholds at minimum; specify mask.vih and mask.vil.` |
-| Missing differential mask thresholds | `.RX > .A/.B has no usable differential thresholds; specify mask.vih and mask.vil.` |
-| Explicit duration too short | `Signal "DATA": explicit duration is too short for complete eye windows after settling.` |
-| Incomplete measurement coverage | `Signal "DATA": recording needs complete eye windows and transmitted high and low bits after settling.` |
-| No received strobe crossings | `Signal "DQ0": no received DQS crossings after settling.` |
-| `setup`/`hold` without `strobeRef` | `mask.setup and mask.hold need a strobeRef.` |
+| Invalid explicit duration | `duration must be finite and greater than zero.` |
 | Extracted PDN | `pdn="extracted" is not implemented yet.` |
 | Coupled `[Package Model]` | `.CPU: coupled [Package Model] not implemented yet; scalar fallback is forbidden.` |
 | Branched routed graph | `Signal "BUS": branched routed graphs are not implemented yet.` |
 
 ## Removed API
 
-The following are removed from the public API. They are not deprecated
-aliases.
+The hand-assembled SI configuration is replaced as follows. Removed names
+are not deprecated aliases.
 
 | Old | New |
 | --- | --- |
@@ -832,10 +652,10 @@ aliases.
 | `inverted` on the second leg | `{ p, n }` |
 | `<ibismodel>` | `<simulation.ibismodel>` |
 | `<voltageprobe>` (for SI) | `receiverRef`, `probe` |
-| `driver` / `receiver` / `strobe` | `driverRef` / `receiverRef` / `strobeRef` |
+| `driver` / `receiver` | `driverRef` / `receiverRef` |
 | `corner` `"typ"` / `"min"` / `"max"` | `"typical"` / `"minimum"` / `"maximum"` |
-| `<analog.eyediagram>` (for SI) | automatic, using `bitRate` or `strobeRef` |
-| `modeling.ddrAssessments` | removed; generic `strobeRef`/`mask` does not replace DDR assessment |
+| `<analog.eyediagram>` (for SI) | not needed; derive from waveforms |
+| `modeling.ddrAssessments` | removed; DDR assessment is outside this RFC |
 | `supply` | selected IBIS model rails at the test corner |
 | hand-appended `pcb_stackup` | `fabricatorPreset` or a board stackup |
 | `simulation.config.ts` / `modeling` export | nothing |
@@ -878,15 +698,27 @@ pair. General transient simulation with `<voltageprobe>` is unchanged.
    Model bytes and native solver execution are IO dependencies, not a second
    modeling configuration. Group and run blocks independently, preserve placed
    models, compute automatic duration, extract routed copper, and lower stimulus
-   and measurements privately.
+   and waveform recording privately.
 5. **cli:** load referenced IBIS assets, provide the native solver adapter,
    call the pipeline with an options object, and print results per block.
 
 The shared call boundary is:
 
 ```ts
-import type { CircuitJson } from "circuit-json"
+import type {
+  CircuitJson,
+  SimulationSignalWaveform,
+  SimulationSignalIntegrityRlgc,
+} from "circuit-json"
 import type { PipelineResult, RunSolver } from "@tscircuit/signal-integrity-pipeline"
+
+interface PipelineBlockResult {
+  simulation_signal_integrity_id: string
+  name?: string
+  duration_s: number
+  results: (SimulationSignalWaveform | SimulationSignalIntegrityRlgc)[]
+  limitations: string[]
+}
 
 interface PipelineOptions {
   circuitJson: CircuitJson
@@ -906,9 +738,10 @@ text, args and outputFiles are string arrays, and exitCode is a number.
 The CLI calls `runPipeline({ circuitJson, ibisSources, runSolver })` and reads
 `result.simulationResultCircuitJson`, **not** the result object as an array.
 That array retains input records and replaces prior SI result records with
-validated results. `result.blocks` holds each block's ID, name, final
-`duration_s`, results and limitations; `result.files` maps artifact paths to
-text. These are exported pipeline types, shared with the CLI.
+validated results. `result.blocks` is `PipelineBlockResult[]`, holding each
+block's ID, name, final `duration_s`, waveform/RLGC results and limitations.
+`result.files` maps artifact paths to text. These are exported pipeline types,
+shared with the CLI.
 
 ## Not implemented yet
 
@@ -917,16 +750,18 @@ text. These are exported pipeline types, shared with the CLI.
 | `pdn="extracted"` | error; default is `"ideal"` with IBIS-derived rails |
 | Coupled `[Package Model]` | error; blocks the AM335x DDR3 write example; scalar package R/L/C is supported |
 | Branched routed graphs, including routed multi-drop | error until graph extraction supports shared junctions, regardless of source-trace grouping |
-| Native DDR device validation | generic strobe timing only; no real DDR/JEDEC validation |
+| Native DDR device validation | outside this waveform-only API; no DDR/JEDEC validation |
 
-The sibling PRs still need the specified duration provenance, DC thresholds,
-fixed-phase eye metrics, RLGC basis, placed-model preservation, pin-state and
-CLI boundary fixes. They are updated separately.
+The sibling PRs still need the waveform-only output, duration provenance,
+RLGC basis, placed-model preservation, pin-state and CLI boundary fixes.
+They are updated separately.
 The current assets are contract examples, not verified native pipeline runs.
 Earlier native prototype runs do not establish that the five PRs work together.
 
 ## Alternatives considered
 
+- **Built-in eye/crosstalk/timing measurements.** Rejected: they are derivable
+  from waveforms; keeping them outside the simulation keeps it small.
 - **Arrays for differential pairs** (`driverRef={[".TX > .A", ".TX > .B"]}`).
   Rejected: an array cannot also mean "several receivers", which multi-drop
   and fly-by buses need.
@@ -946,9 +781,7 @@ Earlier native prototype runs do not establish that the five PRs work together.
 - **`pcbchannelsimulation` with an `analysis` or `type` prop.** Rejected:
   "channel simulation" covers several analyses (transient, statistical eye,
   TDR, S-parameters) with different props and outputs. This RFC is the
-  transient one, so the name says so. A statistical eye would be a separate
-  `pcbstatisticalchannelsimulation`, as `analog.transientsimulation` and
-  `analog.acsweepsimulation` are separate elements.
+  transient one, so the name says so.
 - **Extending `<pcbreturncurrentsimulation>`.** Rejected: it applies a fixed
   current and solves the return-current field; this applies IBIS buffers and
   a bit pattern in the time domain. Almost no prop or output is shared, so

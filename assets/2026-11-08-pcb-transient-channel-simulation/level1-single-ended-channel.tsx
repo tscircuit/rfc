@@ -1,4 +1,4 @@
-// LEVEL 1: one single-ended channel.
+// LEVEL 1: one single-ended receiver waveform.
 const ibisFile = {
   project_relative_path: "models/sn74lvc1g04.ibs",
   url: "./models/sn74lvc1g04.ibs",

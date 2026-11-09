@@ -1,9 +1,7 @@
 /* LEVEL 4: AM335x -> W631GG6MB-12 DDR3 lower-byte write illustration, not JEDEC compliance.
+ * Intended output: eight DQ receiver waveforms and one P−N DQS receiver waveform.
  * Currently stops with: .CPU: coupled [Package Model] not implemented yet; scalar fallback is forbidden.
- * Typ corner is 1.5 V. DQS is delayed 0.5 UI to centre-align write sampling.
- * Setup/hold reuse the DDR3-1600 base values (10/45 ps), without slew derating
- * or separate AC/DC checks: Winbond A03, Table 54, p. 158:
- * https://media.digikey.com/pdf/Data%20Sheets/Winbond%20PDFs/W631GG6MB_A03.pdf#page=158
+ * Typ corner is 1.5 V. DQS is delayed 0.5 UI to centre-align the transmitted write strobe.
  * Footprinter ballcoords uses JEDEC rows: ZCZ 18x18 and Winbond 16x9 with columns 4-6 absent,
  * both 0.8 mm pitch, 0.4 mm pads. pinLabels keys are physical balls; DQSL_N aliases DQSL#.
  * Only this byte lane and representative ideal rail balls are labelled/wired;
@@ -128,8 +126,6 @@ export default () => (
           name={`DQ${i}`}
           driverRef={{ pin: `.CPU > .DDR_D${i}`, model: "Model_257" }}
           receiverRef={{ pin: `.DRAM > .DQL${i}`, model: "ODT_off" }}
-          strobeRef="DQS"
-          mask={{ setup: "10ps", hold: "45ps" }}
         />
       ))}
     </simulation.pcbtransientchannelsimulation>
