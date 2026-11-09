@@ -1,4 +1,4 @@
-// LEVEL 2: two signals.
+// LEVEL 2: two coupled channels.
 import { Inverter } from "./parts"
 
 export default () => (

@@ -1,4 +1,4 @@
-// LEVEL 3: three signals, and measuring crosstalk on its own.
+// LEVEL 3: three channels, and measuring crosstalk on its own.
 import { Inverter } from "./parts"
 
 export default () => (

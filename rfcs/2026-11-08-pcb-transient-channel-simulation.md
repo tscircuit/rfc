@@ -1,4 +1,4 @@
-# Signal Integrity with `<simulation.pcbtransientchannelsimulation>` and `<simulation.pcbchannel>`
+# PCB transient channel simulation: `<simulation.pcbtransientchannelsimulation>` and `<simulation.pcbchannel>`
 
 ## Summary
 
@@ -80,7 +80,7 @@ A differential pair counts as **one** signal.
 | 4 | DDR3 write byte lane, `strobeRef` and `mask` | real controller/memory buffers; generic timing, no JEDEC compliance |
 
 Board examples for each level are in
-[`assets/2026-11-08-signal-integrity-signal-api/`](../assets/2026-11-08-signal-integrity-signal-api/).
+[`assets/2026-11-08-pcb-transient-channel-simulation/`](../assets/2026-11-08-pcb-transient-channel-simulation/).
 
 ### Level 1: one single-ended signal
 
@@ -171,7 +171,7 @@ The two blocks are independent runs over the same board.
 </simulation.pcbtransientchannelsimulation>
 ```
 
-[`level4-ddr3-write.tsx`](../assets/2026-11-08-signal-integrity-signal-api/level4-ddr3-write.tsx)
+[`level4-ddr3-write.tsx`](../assets/2026-11-08-pcb-transient-channel-simulation/level4-ddr3-write.tsx)
 connects AM335x `am335x_zcz` to Winbond `W631GG6MB-12`: DQ0–DQ7 and
 DQS/DQS#. Both use 1.5 V at `typ`. The half-UI DQS offset centre-aligns the
 transmitted write strobe with data. Each data eye folds on its received DQS.
@@ -456,9 +456,7 @@ is 1.8/1.7/1.9 V. At `min`, `Δc=0.50×(1.7−1.8)=−0.050 V`, so
 (`vih`/`vil`, V) are `1.043/0.757`, `0.993/0.707`, `1.093/0.807`.
 Winbond `W631GG6MB-12` `ODT_off` has no `[Receiver Thresholds]` and uses
 0.9/0.6 V at all corners. AM335x receive `Model_1000` uses `[Model Spec]`:
-0.85/0.65, 0.8125/0.6125, 0.8875/0.6875 V. These real-file checks and the
-vectors below are executable with the
-[contract self-check](../assets/2026-11-08-signal-integrity-signal-api/check-review.py).
+0.85/0.65, 0.8125/0.6125, 0.8875/0.6875 V.
 
 ### `strobeRef`
 

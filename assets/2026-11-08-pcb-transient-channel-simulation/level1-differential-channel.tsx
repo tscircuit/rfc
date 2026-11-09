@@ -1,4 +1,4 @@
-// LEVEL 1 (differential): one differential signal. Still ONE signal.
+// LEVEL 1 (differential): one differential channel. A pair is still ONE channel.
 import { sn65hvd72, transceiverPins } from "./parts"
 
 export default () => (
