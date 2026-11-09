@@ -745,23 +745,23 @@ grouped as the last primitive conductor: ground pours and their connections
 for routed copper, or the joined return bars for a straightened section.
 It is not infinity or an additional public row.
 
-C uses a **floating finite return with total charge neutrality**. For the
-primitive Maxwell matrix `Cprim` referenced to infinity, let `s` index the
-signal conductors, `1` include signals and return, `u = Cprim·1`, and
-`d = 1ᵀ·Cprim·1 > 0`. Eliminate the common potential under `Q_total=0`:
+C and G are **ground-referenced**, the convention of multiconductor
+transmission-line models and PCB field solvers. The return conductor (every
+GND pour and GND-connected conductor) is held at 0 V relative to infinity.
+With `s` indexing the signal conductors in the primitive Maxwell matrix
+`Cprim`:
 
-`C = Cprim[s,s] − u_s·u_sᵀ/d`.
+`C = Cprim[s,s]`.
 
-For signal voltages V relative to the return, the eliminated return potential
-relative to infinity is `−u_sᵀ·V/d`. This is not the grounded-return signal
-block `Cprim[s,s]`. For `Cprim=[[4,−1,−1],[−1,4,−1],[−1,−1,4]] pF`, the
-result is `[[10/3,−5/3],[−5/3,10/3]] pF`.
+Only signal excitations are used; the return's own excitation is not needed.
+The signal block must pass the reciprocity check
+`max|C − Cᵀ| / max|C| ≤ 2.5%`, otherwise extraction fails. A block that passes
+is then symmetrized as `(C + Cᵀ)/2`; a failing block is never averaged into
+acceptance. G uses the same rule: `G = Gprim[s,s]`. Lossless G is zero.
 
-Nonzero primitive G uses the analogous floating-return, zero-total-current
-reduction: `uG = Gprim·1`, `dG = 1ᵀ·Gprim·1`,
-`G = Gprim[s,s] − uG_s·uG_sᵀ/dG` for `dG > 0`. If `dG=0` and `uG=0`,
-the common potential is already arbitrary; use `Gprim[s,s]`. Other
-nonpositive-denominator cases are errors. Lossless G is zero.
+This models the return as a solid reference. It does not model a floating
+board's common-mode potential; that is out of scope.
+
 C and G retain Maxwell (nodal) signs:
 diagonal = total capacitance/conductance to all others, including the return;
 off-diagonal = negative mutual value. Thus `ΔV = (R + jωL) I` and
