@@ -482,6 +482,7 @@ The test is computed from information that must be on the board:
 | Buffer behaviour | `<ibismodel>` on each chip with an endpoint |
 | Copper geometry | routed traces, vias and pours |
 | Dielectric and thickness | `fabricatorPreset` or an explicit stackup |
+| Via barrel copper thickness (when vias are present) | `pcb_stackup.plated_hole_copper_thickness`, emitted by `fabricatorPreset` or set by an explicit stackup |
 | Pin rails | selected IBIS model's `[Voltage Range]` and reference keywords at the test corner |
 | Parts on the path without IBIS | a SPICE model on that component (ESD diodes, ferrites, connectors) |
 
