@@ -34,6 +34,10 @@ separate `modeling` file. The [Removed API](#removed-api) section lists the chan
 This is the target contract; the sibling implementation PRs still need the
 review fixes. See [Not implemented yet](#not-implemented-yet).
 
+Options follow tscircuit's no-enum convention: booleans or open strings.
+IBIS values always use the typical corner; die rails are ideal, package
+parasitics remain, and single-ended probes always use local chip ground.
+
 ## Motivation
 
 The current example for a single 20 Mbit/s trace takes about 40 lines of
@@ -142,14 +146,14 @@ import { simulation } from "@tscircuit/core"
 {/* Same copper, D1 held low: the noise on D1 is crosstalk only */}
 <simulation.pcbtransientchannelsimulation name="XTALK_LOW" bitRate="20Mbps">
   <simulation.pcbchannel name="D0" driverRef=".TX > .D0" receiverRef=".RX > .D0" />
-  <simulation.pcbchannel name="D1" driverRef=".TX > .D1" receiverRef=".RX > .D1" quiet="low" />
+  <simulation.pcbchannel name="D1" driverRef=".TX > .D1" receiverRef=".RX > .D1" pattern="0" />
   <simulation.pcbchannel name="D2" driverRef=".TX > .D2" receiverRef=".RX > .D2" />
 </simulation.pcbtransientchannelsimulation>
 
 {/* Same copper, D1 held high */}
 <simulation.pcbtransientchannelsimulation name="XTALK_HIGH" bitRate="20Mbps">
   <simulation.pcbchannel name="D0" driverRef=".TX > .D0" receiverRef=".RX > .D0" />
-  <simulation.pcbchannel name="D1" driverRef=".TX > .D1" receiverRef=".RX > .D1" quiet="high" />
+  <simulation.pcbchannel name="D1" driverRef=".TX > .D1" receiverRef=".RX > .D1" pattern="1" />
   <simulation.pcbchannel name="D2" driverRef=".TX > .D2" receiverRef=".RX > .D2" />
 </simulation.pcbtransientchannelsimulation>
 ```
@@ -167,7 +171,7 @@ three blocks are independent runs over the same board.
 ```tsx
 import { simulation } from "@tscircuit/core"
 
-<simulation.pcbtransientchannelsimulation name="WRITE" bitRate="800Mbps" corner="typical">
+<simulation.pcbtransientchannelsimulation name="WRITE" bitRate="800Mbps">
   <simulation.pcbchannel
     name="DQS"
     driverRef={{
@@ -210,16 +214,14 @@ One block is one SI test: one coupled set of signals and one simulation run.
 | `name` | `string` | optional | Names the test in results. Required only when a board has more than one block. |
 | `bitRate` | `string \| number` | required | Default bit rate for signals. A number is in bit/s. |
 | `duration` | `string \| number` | see below | Simulated time. A number is in seconds. |
-| `corner` | `"typical" \| "minimum" \| "maximum"` | `"typical"` | IBIS corner used for every buffer in this test. |
-| `unlistedNets` | `"passive"` | `"passive"` | How copper not named by a `<simulation.pcbchannel>` is treated (below). |
-| `unrouted` | `"error" \| "ideal"` | `"error"` | What to do when a signal's path is not fully routed. |
-| `pdn` | `"ideal" \| "extracted"` | `"ideal"` | `"ideal"`: die supply and ground reference nodes are ideal; package parasitics remain between die nodes and PCB pins. `"extracted"` (power and ground copper simulated from geometry) is **not implemented yet** and fails with an error. |
+| `allowUnroutedTraces` | `boolean` | `false` | Allows ideal connections for unrouted path segments. Otherwise every segment must be routed. |
 
 ### Recording time
 
 Recording starts at `t = 0`. Bit 0 starts at `offset`; before it, the driver
 holds bit 0. Offsets are nonnegative; UI strings use that channel's bit rate. `clock`
-repeats `01`, so its period is 2 UI. Quiet levels apply from `t = 0`.
+repeats `01`, so its period is 2 UI. Constant patterns and disabled drivers
+apply from `t = 0`.
 
 For switching channels, let `UI_i = 1 / bitRate_i` and
 `S = max(offset_i + 16 * UI_i)`. Automatic duration is
@@ -235,20 +237,21 @@ the pipeline must never extend it. The final recording duration is reported as
 
 ### Unlisted copper
 
-The whole board's copper stays in the extraction and remains coupled.
-Passives and their placed models stay connected. Pin states depend on the
-selected IBIS model's capabilities:
+Unlisted nets are always passive: their copper stays in the extraction and
+remains coupled, and passives and their placed models stay connected.
+Unlisted pins follow the selected IBIS model's capabilities:
 
 | Pin role | State |
 | --- | --- |
-| Listed driver | drives the pattern or the stated quiet level |
+| Listed driver | drives `pattern`, or is disabled by `driverDisabled` |
 | Listed receiver | receives; a model without a receive mode is an error |
 | Unlisted pin with a receive mode | receives, with its output disabled |
 | Unlisted Output-only pin with no receive or disable mode | **driven steady low** |
 | Other unlisted output-capable pin with a disable mode (3-state/I-O) | disabled |
 
-To change an unlisted output's level, list it as a quiet signal. NC pins stay
-unconnected; power/ground pins retain their references and package parasitics.
+To hold an unlisted output low or high, list it with `pattern="0"` or `"1"`;
+to disable it, use `driverDisabled`. NC pins stay unconnected; power/ground
+pins retain their references and package parasitics.
 A passive IBIS load retains its model. An unsupported model capability fails;
 the pipeline must not invent a receive or disabled mode.
 
@@ -265,19 +268,18 @@ may name the same pins.
 | `driverRef` | `Endpoint` | required | The one pin, or `{ p, n }` pair, that drives the signal. |
 | `receiverRef` | `Endpoint \| Endpoint[]` | required | Pin(s) where waveforms are recorded. An array means several receivers (multi-drop). |
 | `bitRate` | `string \| number` | block `bitRate` | Overrides the block bit rate for this signal. |
-| `pattern` | `"prbs7" \| "prbs15" \| "prbs31" \| "clock" \| string` | `"prbs7"` | Bits to send. Any other string is a literal bit string such as `"0011010"`, repeated. |
+| `pattern` | `string` | `"prbs7"` | Open string: `prbs7`, `prbs15`, `prbs31`, `clock`, or a literal bit string such as `"0011010"`, repeated. Constant literals such as `"0"` and `"1"` are quiet. |
 | `seed` | `number` | spaced PRBS phases | Integer `1..2^n-1` for `prbsN`. See below. |
 | `offset` | `string \| number` | `"0UI"` | Nonnegative start time of bit 0. Numbers are seconds; strings accept time units or UI at this channel's bit rate. |
-| `quiet` | `"low" \| "high" \| "off"` | not quiet | Holds the driver steady instead of sending `pattern` (below). |
-| `probe` | `"local" \| "global"` | `"local"` | Ground reference for single-ended probes (below). |
+| `driverDisabled` | `boolean` | `false` | When true, holds the driver disabled (high impedance), taking precedence over `pattern`. Counts as quiet. |
 
 ### PRBS seeds
 
 There is no hashing. For each PRBS order, build a phase plan from the sorted
 union of PRBS signal names across the board's blocks (Unicode code point
-order). Include quiet signals with that declared PRBS pattern. Each block
-uses the same plan, so the same name and PRBS order send the same bits in
-every block, including traffic/quiet comparisons.
+order). Include disabled drivers with that declared PRBS pattern. Each
+block uses the same plan, so the same name and PRBS order send the same bits
+in every block, including traffic/quiet comparisons.
 
 For `K` names and period `P = 2^n - 1`, name `i` gets phase
 `1 + floor(i * P / K)`, for `i = 0..K-1`. These distinct nonzero phases are
@@ -288,8 +290,8 @@ may deliberately repeat a phase.
 
 Props, core, Circuit JSON and pipeline must all reject an explicit PRBS seed
 unless it is an integer in `1..2^n-1`. Do not truncate, mask or coerce it into
-range. A seed is unused for clock, literal and quiet drives; omit it from
-non-PRBS source records. Quiet PRBS records retain their planned seed.
+range. A seed is unused for clock, literal and disabled drives; omit it from
+non-PRBS source records. Disabled PRBS records retain their planned seed.
 
 All repos use the same generator: output the state's most significant bit,
 then shift left within `n` bits and append the XOR of bits `(n, tap)`, numbered
@@ -344,50 +346,26 @@ stay attached, but traversal stops at the rail.
 
 There is one listed driver per signal. Other pins follow the capability
 rules above; a second enabled output on the same topology is an error.
-Every segment to every receiver must be routed under `unrouted="error"`,
-including segments after passives. Only `unrouted="ideal"` permits ideal
-connections. A bidirectional bus uses two blocks, one per direction.
+Every segment to every receiver must be routed by default, including those
+after passives. `allowUnroutedTraces={true}` permits ideal connections for
+unrouted segments. A bidirectional bus uses two blocks, one per direction.
 
-### `quiet`
+### Quiet signals
 
-`quiet` turns a signal into a crosstalk victim:
-
-| Value | Driver state | Use |
-| --- | --- | --- |
-| `"low"` | enabled, held at logic 0 | noise pushing a 0 towards a false 1 |
-| `"high"` | enabled, held at logic 1 | noise pushing a 1 towards a false 0 |
-| `"off"` | disabled (high impedance) | an undriven shared bus or an open-drain line |
-
-The level must be stated, because the results differ. The pull-up and
-pull-down transistors have different strengths, and the dangerous direction
-of the noise depends on the level. The idle level is part of the protocol:
-UART and I²C idle high, while many buses idle low.
-
-A quiet signal is probed at both ends:
-
-- the **near end** is the driver pin;
-- the **far end** is each receiver pin.
-
-Each waveform carries its undisturbed idle voltage, so the noise can be
-derived by subtraction.
-
-`quiet="off"` requires a disabled state on every driver leg. An Output-only
+A constant literal pattern (`"0"`, `"1"`, `"000"`, `"111"`, etc.) holds a
+quiet crosstalk victim at logic 0 or 1. Keep the literal in `pattern`.
+`driverDisabled={true}` holds it disabled (high impedance), overriding
+`pattern`; it requires a disable state on every driver leg. An Output-only
 model without one is an error. Do not synthesize a passive input mode.
 
-Constant literals (`"0"`, `"1"`, `"000"`, `"111"`, etc.) are normalized to
-`quiet="low"` or `quiet="high"`. Explicit `quiet` takes precedence over
-`pattern`. All quiet signals have near/far waveforms and idle voltages.
+All quiet signals record the driver (near end) and each receiver (far end),
+each with its undisturbed idle voltage so noise can be derived by subtraction.
 
-### `probe`
+### Probe reference
 
-- `"local"` measures each single-ended pin against the PCB ground pin of its own
-  chip. This matches a scope probe with a short ground lead.
-- `"global"` measures against the block's reference ground.
-
-Differential waveforms always record `P − N`; `probe` has no effect on them.
-With ideal die rails, local and global probes can still differ by the voltage
-across package ground parasitics. Local means the PCB ground pin; global
-means the block reference.
+Single-ended probes always measure each driver or receiver pin against its
+own chip's PCB ground pin. This matches a scope probe with a short ground
+lead. Differential waveforms record `P − N`.
 
 ## Board requirements
 
@@ -399,7 +377,7 @@ The test is computed from information that must be on the board:
 | Copper geometry | routed traces, vias and pours |
 | Dielectric and thickness | `fabricatorPreset` or an explicit stackup |
 | Via barrel copper thickness (when vias are present) | `pcb_stackup.plated_hole_copper_thickness`, emitted by `fabricatorPreset` or set by an explicit stackup |
-| Pin rails | selected IBIS model's `[Voltage Range]` and reference keywords at the test corner |
+| Pin rails | selected IBIS model's `[Voltage Range]` and reference keywords at the typical corner |
 | Parts on the path without IBIS | a SPICE model on that component (ESD diodes, ferrites, connectors) |
 
 If any of these is missing, rendering fails with a specific error. It does
@@ -418,15 +396,14 @@ An endpoint's `model` overrides that choice for one test. `sot23_5` in the
 examples matches `SN74LVC1G04DBV` and `LVC1G04_DBV`: pins 2=A, 3=GND, 4=Y,
 5=VCC. The SC70 `DCK` component is a different package.
 
-There is no `supply` prop. With `pdn="ideal"`, each selected pin model sets
-its rails from `[Voltage Range]` at `typ`, `min` or `max`. Its `[Pullup
+Die supply and ground reference nodes are always ideal; package parasitics
+remain between die nodes and PCB pins. There is no `supply` prop. Each
+selected pin model sets its rails from `[Voltage Range]` at `typ`. Its `[Pullup
 Reference]`, `[Pulldown Reference]`, `[POWER Clamp Reference]` and `[GND Clamp
 Reference]` override the corresponding reference voltages when present.
 Absent low references are 0 V; absent high references use `[Voltage Range]`.
-For `LVC1G04_OUT_33`, the rails are 3.3 / 3.0 / 3.6 V at typ/min/max.
-Conflicting ideal voltages on a shared reference are an error. Board supply
-sources become relevant only with `pdn="extracted"`, which is not implemented.
-The ideal-PDN examples need no voltage source.
+For `LVC1G04_OUT_33`, the typical supply is 3.3 V. Conflicting ideal voltages
+on a shared reference are an error. The examples need no voltage source.
 
 ## Numerical settings are not API
 
@@ -448,10 +425,10 @@ in which signals are written.
 
 Each block produces voltage-vs-time waveforms:
 
-| Signal kind | Waveforms |
+| Signal | Waveforms |
 | --- | --- |
 | switching | one far-end waveform at each receiver |
-| quiet (including constant literals) | one near-end waveform at the driver and one far-end waveform at each receiver, each with its undisturbed idle voltage |
+| quiet (constant literal pattern or disabled driver) | one near-end waveform at the driver and one far-end waveform at each receiver, each with its undisturbed idle voltage |
 
 Differential endpoints emit P−N only; separate P and N waveforms are not
 kept. Extracted RLGC records are retained as solver output, not measurements.
@@ -471,10 +448,7 @@ interface SimulationSignalIntegrity {
   name?: string
   bit_rate_bps: number
   duration_s?: number
-  corner: "typical" | "minimum" | "maximum"
-  unlisted_nets: "passive"
-  unrouted: "error" | "ideal"
-  pdn: "extracted" | "ideal"
+  allow_unrouted_traces: boolean
 }
 
 interface SimulationSignal {
@@ -488,14 +462,12 @@ interface SimulationSignal {
   pattern: string
   seed?: number
   offset_s: number
-  quiet?: "low" | "high" | "off"
-  probe: "local" | "global"
+  driver_disabled?: boolean
 }
 
 type SignalEndpoint =
-  | { kind: "single"; source_port_id: string; ibis_model_name?: string }
+  | { source_port_id: string; ibis_model_name?: string }
   | {
-      kind: "differential"
       p_source_port_id: string
       n_source_port_id: string
       p_ibis_model_name?: string
@@ -503,9 +475,13 @@ type SignalEndpoint =
     }
 ```
 
+Endpoints are strict objects matching exactly one shape; mixed or unknown
+fields are rejected. Differential P/N ports must be distinct, and every
+receiver must have the same shape as its driver.
+
 PRBS source records carry the resolved seed in the range above. A pair's
-string model override expands to both per-leg fields. Constant literals
-carry their normalized `quiet` state.
+string model override expands to both per-leg fields. Constant patterns
+retain their literal string; disabled drivers set `driver_disabled: true`.
 
 Result records, produced by the simulation. These are the exact shared
 interfaces; props, core, Circuit JSON, pipeline and CLI must use one contract.
@@ -517,7 +493,6 @@ interface SimulationSignalWaveform {
   type: "simulation_signal_waveform"
   simulation_signal_waveform_id: string
   simulation_signal_id: string
-  end: "near" | "far"
   source_port_id: string
   timestamps_s: number[]
   voltage_levels: number[]
@@ -528,7 +503,7 @@ interface SimulationSignalIntegrityRlgc {
   type: "simulation_signal_integrity_rlgc"
   simulation_signal_integrity_rlgc_id: string
   simulation_signal_integrity_id: string
-  conductors: { simulation_signal_id: string; leg: "p" | "n" | "single" }[]
+  conductors: { simulation_signal_id: string; source_port_id: string }[]
   matrices: {
     frequency_hz: number
     r_ohm: number[][]
@@ -542,31 +517,32 @@ interface SimulationSignalIntegrityRlgc {
 Waveforms use parallel, nonempty arrays of equal length: strictly increasing
 recording times in seconds and voltages in volts. Every numeric result must
 be finite. Waveforms span `0..result.blocks[].duration_s`.
-CSV exports preserve channel/end/pin identities, time and voltage samples,
+CSV exports preserve signal and port identities, time and voltage samples,
 and quiet idle voltages.
 
 Emit one far waveform per receiver for every signal. For a quiet signal,
-also emit one near waveform for its driver. `source_port_id` identifies the
-receiver for `end="far"` and the driver for `end="near"`. Never collapse
-receivers into a maximum. For a differential endpoint, `source_port_id` is
-its P port and voltage is P−N; separate leg waveforms are not emitted.
+also emit one near waveform for its driver. Derive near/far from
+`source_port_id`: the driver port is near, a receiver port is far. Never
+collapse receivers into a maximum. For a differential endpoint, use its P
+port and P−N voltage; separate P and N waveforms are not emitted.
 
 `idle_voltage_v` is required on every quiet waveform and absent on switching
 waveforms. At each quiet endpoint, find the undisturbed idle voltage from
 the same circuit with aggressors held at their initial levels. Keep the
-victim's selected quiet state, including off, its termination and its probe
+victim's constant pattern or disabled state, its termination and its local
 reference; for a differential endpoint the idle voltage is P−N. Never use
-the disturbed waveform's mean. A floating off victim without a unique idle
-operating point is an error.
+the disturbed waveform's mean. A floating disabled victim without a unique
+idle operating point is an error.
 
 RLGC has nonempty `conductors` and `matrices` arrays. Each matrix is
 `conductors.length` square at its positive `frequency_hz`;
 frequencies are unique and increasing. Rows and columns use the same listed
 conductor order at every frequency. Entries are total ohms, henries, farads
-and siemens, not per metre. A pair contributes distinct P and N rows; a
-single-ended channel contributes `single`. Public matrices select only listed
-legs. Unlisted copper remains in the private extraction and transient model.
-Conductor identities are unique.
+and siemens, not per metre. Each signal has exactly one conductor for a
+single-ended driver, or exactly two with distinct P/N driver ports for a
+differential driver. The port identifies the leg; duplicate
+`(simulation_signal_id, source_port_id)` pairs are forbidden. Public matrices
+select only listed conductors; unlisted copper remains in the private model.
 
 R and L are loop matrices, one loop per conductor against the eliminated
 return: `R = Aᵀ R_primitive A`, `L = Aᵀ L_primitive A`, with `A = [I; -ones]`.
@@ -618,17 +594,15 @@ public Circuit JSON.
 | A second driving pin on the topology | `Signal "BUS" has two drivers: .TX > .A and .U3 > .A. Exactly one pin drives a signal.` |
 | `receiverRef` not on the driver's topology | `Receiver .RX > .A is not connected to the copper of signal "DATA".` |
 | `{ p, n }` legs swapped relative to IBIS `[Diff_pin]` | `Signal "BUS": .TX > .B is the inverting pin; swap p and n.` |
-| Path not routed and `unrouted="error"` | `Signal "DATA" is not routed between .TX > .Y and .RX > .A.` |
+| Path not routed and `allowUnroutedTraces` is false | `Signal "DATA" is not routed between .TX > .Y and .RX > .A.` |
 | No stackup | `<simulation.pcbtransientchannelsimulation> needs a stackup: set fabricatorPreset or define one.` |
 | Unmodelled part on the path | `.D5 is on signal "DATA" and has no SPICE or IBIS model.` |
 | Placed model cannot be lowered | `.D5: placed SPICE model is unsupported; it cannot be discarded.` |
-| Conflicting ideal reference voltages | `.U1: shared reference VCC has incompatible IBIS corner voltages.` |
+| Conflicting ideal reference voltages | `.U1: shared reference VCC has incompatible typical IBIS voltages.` |
 | Two or more blocks and one has no `name` | `This board has 3 <simulation.pcbtransientchannelsimulation> blocks; give each a name.` |
-| Bare `quiet` | `quiet needs a level: "low", "high" or "off".` |
-| `quiet="off"` without a disabled state | `Signal "DATA": .TX > .Y model LVC1G04_OUT_33 has no disabled state; use quiet="low" or "high".` |
-| Off victim has no unique idle voltage | `Signal "BUS": floating quiet victim has no undisturbed idle operating point.` |
+| `driverDisabled` without a disable state on every driver leg | `Signal "DATA": .TX > .Y model LVC1G04_OUT_33 has no disabled state.` |
+| Disabled victim has no unique idle voltage | `Signal "BUS": floating disabled victim has no undisturbed idle operating point.` |
 | Invalid explicit duration | `duration must be finite and greater than zero.` |
-| Extracted PDN | `pdn="extracted" is not implemented yet.` |
 | Coupled `[Package Model]` | `.CPU: coupled [Package Model] not implemented yet; scalar fallback is forbidden.` |
 | Branched routed graph | `Signal "BUS": branched routed graphs are not implemented yet.` |
 
@@ -646,15 +620,14 @@ are not deprecated aliases.
 | `modeling.reduction`, `sections`, `extraction.*` | chosen by the implementation |
 | `modeling.profiles`, `straightened_stage_profiles` | the board's copper and stackup |
 | `passiveComponentRefs`, `termination` | placed passives on the topology |
-| `<analog.digitalstimulus>` (for SI) | `pattern`, `seed`, `offset`, `quiet` |
+| `<analog.digitalstimulus>` (for SI) | `pattern`, `seed`, `offset`, `driverDisabled` |
 | `inverted` on the second leg | `{ p, n }` |
 | `<ibismodel>` | `<simulation.ibismodel>` |
-| `<voltageprobe>` (for SI) | `receiverRef`, `probe` |
+| `<voltageprobe>` (for SI) | `receiverRef` with local chip ground |
 | `driver` / `receiver` | `driverRef` / `receiverRef` |
-| `corner` `"typ"` / `"min"` / `"max"` | `"typical"` / `"minimum"` / `"maximum"` |
 | `<analog.eyediagram>` (for SI) | not needed; derive from waveforms |
 | `modeling.ddrAssessments` | removed; DDR assessment is outside this RFC |
-| `supply` | selected IBIS model rails at the test corner |
+| `supply` | selected IBIS model rails at the typical corner |
 | hand-appended `pcb_stackup` | `fabricatorPreset` or a board stackup |
 | `simulation.config.ts` / `modeling` export | nothing |
 
@@ -662,11 +635,8 @@ The `examples/` directory in `tscircuit/signal-integrity-pipeline` is
 rewritten using the levels above.
 
 `<ibismodel>` becomes `<simulation.ibismodel>`, beside the other simulation
-elements. The old `<ibismodel>` name is removed. It describes the
-chip, not the test. Its
-`modelValueCorner` prop is removed, because the corner is a test choice: it is
-set by `corner` on `<simulation.pcbtransientchannelsimulation>`, so the same board can be run at all
-three corners.
+elements. The old `<ibismodel>` name and its `modelValueCorner` prop are
+removed; IBIS values always use the typical corner.
 
 Its `includePackageParasitics` prop is also removed. The package R, L and C
 from the IBIS `[Package]`, `[Pin]` and package model sections are always
@@ -745,7 +715,6 @@ shared with the CLI.
 
 | Feature | Current boundary |
 | --- | --- |
-| `pdn="extracted"` | error; default is `"ideal"` with IBIS-derived rails |
 | Coupled `[Package Model]` | error; blocks the AM335x DDR3 write example; scalar package R/L/C is supported |
 | Branched routed graphs, including routed multi-drop | error until graph extraction supports shared junctions, regardless of source-trace grouping |
 | Native DDR device validation | outside this waveform-only API; no DDR/JEDEC validation |
@@ -763,8 +732,6 @@ They are updated separately.
   and fly-by buses need.
 - **A `termination` prop.** Rejected: a placed resistor is either on the
   copper or not. A prop could only disagree with the board.
-- **Boolean `quiet`.** Rejected: low and high give different results, and
-  the right level depends on the protocol.
 - **Keeping `modeling` as an advanced escape hatch.** Rejected: it keeps two
   sources of truth, and every value in it is either derivable from the board
   or a numerical setting.
